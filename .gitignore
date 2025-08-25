@@ -139,6 +139,7 @@ config/production.js
 *.crt
 *.p12
 *.pfx
+temp_key.txt
 
 # Database
 *.sqlite
