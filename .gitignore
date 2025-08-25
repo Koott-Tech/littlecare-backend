@@ -130,3 +130,86 @@ Thumbs.db
 Dockerfile
 docker-compose.yml
 docker-compose.*.yml
+
+# Backend specific
+config/local.js
+config/production.js
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Database
+*.sqlite
+*.db
+*.sql
+
+# Session store
+sessions/
+
+# Cache
+.cache/
+*.cache
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Local development
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Coverage
+coverage/
+*.lcov
+.nyc_output/
+
+# Build outputs
+dist/
+build/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# PM2
+.pm2/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+.eslintcache
