@@ -3,13 +3,14 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticateToken } = require('../middleware/auth');
 const { 
-  validateUserRegistration, 
+  validateClientRegistration, 
   validateUserLogin 
 } = require('../utils/validation');
 
 // Public routes
-router.post('/register', validateUserRegistration, authController.register);
+router.post('/register/client', validateClientRegistration, authController.registerClient); // Only clients can register
 router.post('/login', validateUserLogin, authController.login);
+router.get('/registration-info', authController.getRegistrationInfo); // Info about registration policies
 
 // Protected routes
 router.get('/profile', authenticateToken, authController.getProfile);

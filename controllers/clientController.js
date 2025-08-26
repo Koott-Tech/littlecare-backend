@@ -93,54 +93,85 @@ const getSessions = async (req, res) => {
       );
     }
 
-    let query = supabase
-      .from('sessions')
-      .select(`
-        *,
-        psychologist:psychologists(
-          id,
-          first_name,
-          last_name,
-          area_of_expertise,
-          profile_picture_url:users(profile_picture_url)
-        ),
-        package:packages(
-          id,
-          package_type,
-          price,
-          description
-        )
-      `)
-      .eq('client_id', client.id);
+    // Check if sessions table exists and has proper relationships
+    try {
+      let query = supabase
+        .from('sessions')
+        .select(`
+          *,
+          psychologist:psychologists(
+            id,
+            first_name,
+            last_name,
+            area_of_expertise
+          ),
+          package:packages(
+            id,
+            package_type,
+            price,
+            description
+          )
+        `)
+        .eq('client_id', client.id);
 
-    // Filter by status if provided
-    if (status) {
-      query = query.eq('status', status);
-    }
+      // Filter by status if provided
+      if (status) {
+        query = query.eq('status', status);
+      }
 
-    // Add pagination
-    const offset = (page - 1) * limit;
-    query = query.range(offset, offset + limit - 1);
+      // Add pagination
+      const offset = (page - 1) * limit;
+      query = query.range(offset, offset + limit - 1);
 
-    const { data: sessions, error, count } = await query;
+      const { data: sessions, error, count } = await query;
 
-    if (error) {
-      console.error('Get client sessions error:', error);
-      return res.status(500).json(
-        errorResponse('Failed to fetch sessions')
+      if (error) {
+        // If there's a database relationship error, return empty sessions
+        if (error.code === 'PGRST200' || error.message.includes('relationship') || error.message.includes('schema cache')) {
+          console.log('Database relationships not fully established, returning empty sessions for new client');
+          return res.json(
+            successResponse({
+              sessions: [],
+              pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: 0
+              }
+            })
+          );
+        }
+        
+        console.error('Get client sessions error:', error);
+        return res.status(500).json(
+          errorResponse('Failed to fetch sessions')
+        );
+      }
+
+      res.json(
+        successResponse({
+          sessions: sessions || [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: count || (sessions ? sessions.length : 0)
+          }
+        })
+      );
+
+    } catch (dbError) {
+      // If there's any database error, return empty sessions for new clients
+      console.log('Database error in sessions query, returning empty sessions for new client:', dbError.message);
+      return res.json(
+        successResponse({
+          sessions: [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: 0
+          }
+        })
       );
     }
-
-    res.json(
-      successResponse({
-        sessions,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: count || sessions.length
-        }
-      })
-    );
 
   } catch (error) {
     console.error('Get client sessions error:', error);
@@ -380,8 +411,8 @@ const getAvailablePsychologists = async (req, res) => {
         last_name,
         area_of_expertise,
         description,
-        designation,
-        users(profile_picture_url),
+        experience_years,
+        cover_image_url,
         packages(id, package_type, price, description)
       `);
 

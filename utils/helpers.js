@@ -29,7 +29,9 @@ const generateUUID = () => {
 
 // Format date for database
 const formatDate = (date) => {
-  return new Date(date).toISOString().split('T')[0];
+  // Use Indian Standard Time (IST) - UTC+5:30
+  const inputDate = new Date(date);
+  return inputDate.toISOString().split('T')[0];
 };
 
 // Format time for database

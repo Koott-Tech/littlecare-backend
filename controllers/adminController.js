@@ -5,6 +5,36 @@ const {
   hashPassword
 } = require('../utils/helpers');
 
+// Helper function to get availability dates for a day of the week
+const getAvailabilityDatesForDay = (dayName, numOccurrences = 1) => {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayIndex = days.indexOf(dayName);
+  if (dayIndex === -1) return [];
+  
+  // Use Indian Standard Time (IST) - UTC+5:30
+  const today = new Date();
+  const istToday = new Date(today.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
+  const currentDay = istToday.getDay();
+  let daysUntilNext = dayIndex - currentDay;
+  
+  // If today is the target day, start from today
+  if (daysUntilNext === 0) {
+    daysUntilNext = 0;
+  } else if (daysUntilNext < 0) {
+    // If the day has passed this week, start from next week
+    daysUntilNext += 7;
+  }
+  
+  const dates = [];
+  for (let occurrence = 0; occurrence < numOccurrences; occurrence++) {
+    const date = new Date(istToday);
+    date.setDate(istToday.getDate() + daysUntilNext + (occurrence * 7));
+    dates.push(date);
+  }
+  
+  return dates;
+};
+
 // Get all users
 const getAllUsers = async (req, res) => {
   try {
@@ -13,6 +43,110 @@ const getAllUsers = async (req, res) => {
     
     const { page = 1, limit = 10, role, search, sort = 'created_at', order = 'desc' } = req.query;
 
+    // If fetching psychologists, get them directly from psychologists table
+    if (role === 'psychologist') {
+      console.log('=== Fetching psychologists directly from psychologists table ===');
+      
+      // Fetch psychologists directly from psychologists table with pagination
+      const offset = (page - 1) * limit;
+      const { data: psychologists, error: psychError } = await supabase
+        .from('psychologists')
+        .select('*')
+        .range(offset, offset + limit - 1)
+        .order('created_at', { ascending: order === 'asc' });
+
+      if (psychError) {
+        console.error('Error fetching psychologists:', psychError);
+        return res.status(500).json(
+          errorResponse('Failed to fetch psychologists')
+        );
+      }
+
+      console.log('Successfully fetched psychologists:', psychologists?.length || 0);
+      console.log('Psychologists data:', psychologists);
+      
+      // Convert psychologists to the expected format
+      const enrichedPsychologists = psychologists.map(psych => ({
+        id: psych.id, // Use psychologist ID as the main ID
+        email: psych.email,
+        role: 'psychologist',
+        profile_picture_url: null,
+        created_at: psych.created_at,
+        updated_at: psych.updated_at,
+        psychologist_id: psych.id, // For delete operations
+        first_name: psych.first_name || '',
+        last_name: psych.last_name || '',
+        name: psych ? `${psych.first_name} ${psych.last_name}`.trim() : '',
+        phone: psych.phone || '',
+        ug_college: psych.ug_college || '',
+        pg_college: psych.pg_college || '',
+        phd_college: psych.phd_college || '',
+        description: psych.description || '',
+        experience_years: psych.experience_years || 0,
+        area_of_expertise: psych.area_of_expertise || [],
+        availability: [], // Will be populated below
+        cover_image_url: psych.cover_image_url || null
+      }));
+
+      // Fetch availability data for all psychologists
+      if (enrichedPsychologists.length > 0) {
+        try {
+          const psychologistIds = enrichedPsychologists
+            .map(user => user.psychologist_id)
+            .filter(Boolean);
+
+          if (psychologistIds.length > 0) {
+            const { data: availabilityData, error: availabilityError } = await supabase
+              .from('availability')
+              .select('*')
+              .in('psychologist_id', psychologistIds);
+
+            if (!availabilityError && availabilityData) {
+              console.log('Availability data fetched:', availabilityData);
+              
+              // Group availability by psychologist_id
+              const availabilityMap = {};
+              availabilityData.forEach(avail => {
+                if (!availabilityMap[avail.psychologist_id]) {
+                  availabilityMap[avail.psychologist_id] = [];
+                }
+                
+                // Return date-based availability directly (no weekday conversion)
+                availabilityMap[avail.psychologist_id].push({
+                  date: avail.date,
+                  time_slots: avail.time_slots,
+                  is_available: avail.is_available
+                });
+              });
+
+              // Add availability to enriched users
+              enrichedPsychologists.forEach(user => {
+                user.availability = availabilityMap[user.psychologist_id] || [];
+              });
+            }
+          }
+        } catch (availabilityError) {
+          console.error('Error fetching availability data:', availabilityError);
+          // Continue without availability data
+        }
+      }
+
+      console.log('Final enriched psychologists:', enrichedPsychologists);
+      
+      // Return psychologists directly without going through users table logic
+      return res.json(
+        successResponse({
+          users: enrichedPsychologists,
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: enrichedPsychologists.length
+          }
+        })
+      );
+    }
+
+    // For other roles, fetch from users table as before
     // Test Supabase connection first
     try {
       const { data: testData, error: testError } = await supabase
@@ -68,106 +202,7 @@ const getAllUsers = async (req, res) => {
       );
     }
 
-    // If fetching psychologists, get their profile information
     let enrichedUsers = users;
-    if (role === 'psychologist') {
-      const userIds = users.map(user => user.id);
-      console.log('Fetching psychologist profiles for users:', userIds);
-      
-      // Only proceed if there are users to fetch profiles for
-      if (userIds.length > 0) {
-        try {
-          const { data: psychologists, error: psychError } = await supabase
-            .from('psychologists')
-            .select('*')
-            .in('user_id', userIds);
-
-          if (psychError) {
-            console.error('Error fetching psychologist profiles:', psychError);
-            // Continue with basic user data if psychologist profiles fail
-            enrichedUsers = users.map(user => ({
-              ...user,
-              first_name: '',
-              last_name: '',
-              name: '',
-              phone: '',
-              ug_college: '',
-              pg_college: '',
-              phd_college: '',
-              description: '',
-              experience_years: 0,
-              area_of_expertise: [],
-              availability: [],
-              cover_image_url: null
-            }));
-          } else {
-            console.log('Successfully fetched psychologist profiles:', psychologists?.length || 0);
-            
-            // Create a map of psychologist profiles by user_id
-            const psychMap = {};
-            psychologists.forEach(psych => {
-              psychMap[psych.user_id] = psych;
-            });
-
-            // Enrich users with psychologist profile data
-            enrichedUsers = users.map(user => {
-              const psych = psychMap[user.id];
-              return {
-                ...user,
-                first_name: psych?.first_name || '',
-                last_name: psych?.last_name || '',
-                name: psych ? `${psych.first_name} ${psych.last_name}`.trim() : '',
-                phone: psych?.phone || '',
-                ug_college: psych?.ug_college || '',
-                pg_college: psych?.pg_college || '',
-                phd_college: psych?.phd_college || '',
-                description: psych?.description || '',
-                experience_years: psych?.experience_years || 0,
-                area_of_expertise: psych?.area_of_expertise || [],
-                availability: psych?.availability || [],
-                cover_image_url: psych?.cover_image_url || null
-              };
-            });
-          }
-        } catch (psychError) {
-          console.error('Exception while fetching psychologist profiles:', psychError);
-          // Continue with basic user data if there's an exception
-          enrichedUsers = users.map(user => ({
-            ...user,
-            first_name: '',
-            last_name: '',
-            name: '',
-            phone: '',
-            ug_college: '',
-            pg_college: '',
-            phd_college: '',
-            description: '',
-            experience_years: 0,
-            area_of_expertise: [],
-            availability: [],
-            cover_image_url: null
-          }));
-        }
-      } else {
-        console.log('No users with psychologist role found');
-        // Set default values for users without psychologist profiles
-        enrichedUsers = users.map(user => ({
-          ...user,
-          first_name: '',
-          last_name: '',
-          name: '',
-          phone: '',
-          ug_college: '',
-          pg_college: '',
-          phd_college: '',
-          description: '',
-          experience_years: 0,
-          area_of_expertise: [],
-          availability: [],
-          cover_image_url: null
-        }));
-      }
-    }
 
     // Filter by search if provided
     let filteredUsers = enrichedUsers;
@@ -198,12 +233,173 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+// Get all psychologists directly from psychologists table (admin only)
+const getAllPsychologists = async (req, res) => {
+  try {
+    console.log('=== getAllPsychologists function called ===');
+    console.log('Query params:', req.query);
+    
+    const { page = 1, limit = 10, search, sort = 'created_at', order = 'desc' } = req.query;
+
+    // Fetch psychologists directly from psychologists table with pagination
+    const offset = (page - 1) * limit;
+    const { data: psychologists, error: psychError } = await supabase
+      .from('psychologists')
+      .select('*')
+      .range(offset, offset + limit - 1)
+      .order('created_at', { ascending: order === 'asc' });
+
+    if (psychError) {
+      console.error('Error fetching psychologists:', psychError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch psychologists')
+      );
+    }
+
+    console.log('Successfully fetched psychologists:', psychologists?.length || 0);
+    console.log('Psychologists data:', psychologists);
+    
+    // Convert psychologists to the expected format
+    const enrichedPsychologists = psychologists.map(psych => ({
+      id: psych.id, // Use psychologist ID as the main ID
+      email: psych.email,
+      role: 'psychologist',
+      profile_picture_url: null,
+      created_at: psych.created_at,
+      updated_at: psych.updated_at,
+      psychologist_id: psych.id, // For delete operations
+      first_name: psych.first_name || '',
+      last_name: psych.last_name || '',
+      name: psych ? `${psych.first_name} ${psych.last_name}`.trim() : '',
+      phone: psych.phone || '',
+      ug_college: psych.ug_college || '',
+      pg_college: psych.pg_college || '',
+      phd_college: psych.phd_college || '',
+      description: psych.description || '',
+      experience_years: psych.experience_years || 0,
+      area_of_expertise: psych.area_of_expertise || [],
+      availability: [], // Will be populated below
+      cover_image_url: psych.cover_image_url || null
+    }));
+
+    // Fetch availability data for all psychologists
+    if (enrichedPsychologists.length > 0) {
+      try {
+        const psychologistIds = enrichedPsychologists
+          .map(user => user.psychologist_id)
+          .filter(Boolean);
+
+        if (psychologistIds.length > 0) {
+          const { data: availabilityData, error: availabilityError } = await supabase
+            .from('availability')
+            .select('*')
+            .in('psychologist_id', psychologistIds);
+
+          if (!availabilityError && availabilityData) {
+            console.log('Availability data fetched:', availabilityData);
+            
+            // Group availability by psychologist_id
+            const availabilityMap = {};
+            availabilityData.forEach(avail => {
+              if (!availabilityMap[avail.psychologist_id]) {
+                availabilityMap[avail.psychologist_id] = [];
+              }
+              
+              // Convert date-based availability back to day-based for frontend compatibility
+              const date = new Date(avail.date);
+              const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+              
+              // Handle different time_slots formats
+              let slots = [];
+              if (avail.time_slots) {
+                if (typeof avail.time_slots === 'string') {
+                  // If it's a string, try to parse it
+                  try {
+                    const parsed = JSON.parse(avail.time_slots);
+                    slots = parsed.slots || parsed || [];
+                  } catch (e) {
+                    slots = [avail.time_slots];
+                  }
+                } else if (avail.time_slots.slots) {
+                  // If it has a slots property
+                  slots = avail.time_slots.slots;
+                } else if (Array.isArray(avail.time_slots)) {
+                  // If it's directly an array
+                  slots = avail.time_slots;
+                } else {
+                  slots = [];
+                }
+              }
+              
+              availabilityMap[avail.psychologist_id].push({
+                day: dayName,
+                slots: slots
+              });
+            });
+
+            // Add availability to enriched users
+            enrichedPsychologists.forEach(user => {
+              user.availability = availabilityMap[user.psychologist_id] || [];
+            });
+          }
+        }
+      } catch (availabilityError) {
+        console.error('Error fetching availability data:', availabilityError);
+        // Continue without availability data
+      }
+    }
+
+    console.log('Final enriched psychologists:', enrichedPsychologists);
+    
+    // Return psychologists directly
+    return res.json(
+      successResponse({
+        users: enrichedPsychologists,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: enrichedPsychologists.length
+        }
+      })
+    );
+
+  } catch (error) {
+    console.error('Get all psychologists error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching psychologists')
+    );
+  }
+};
+
 // Get user details with profile
 const getUserDetails = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Get user
+    // First check if it's a psychologist
+    const { data: psychologist, error: psychologistError } = await supabase
+      .from('psychologists')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (psychologist && !psychologistError) {
+      return res.json(
+        successResponse({
+          user: {
+            id: psychologist.id,
+            email: psychologist.email,
+            role: 'psychologist',
+            profile_picture_url: null,
+            created_at: psychologist.created_at,
+            updated_at: psychologist.updated_at,
+            profile: psychologist
+          }
+        })
+      );
+    }
+
+    // If not a psychologist, check users table
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('*')
@@ -225,13 +421,6 @@ const getUserDetails = async (req, res) => {
         .eq('user_id', userId)
         .single();
       profile = client;
-    } else if (user.role === 'psychologist') {
-      const { data: psychologist } = await supabase
-        .from('psychologists')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-      profile = psychologist;
     }
 
     res.json(
@@ -378,7 +567,30 @@ const deactivateUser = async (req, res) => {
 // Get platform statistics
 const getPlatformStats = async (req, res) => {
   try {
+    console.log('=== getPlatformStats function called ===');
+    
     const { start_date, end_date } = req.query;
+
+    // Test database connection first
+    try {
+      const { data: testData, error: testError } = await supabase
+        .from('users')
+        .select('count')
+        .limit(1);
+      
+      if (testError) {
+        console.error('Database connection test failed:', testError);
+        return res.status(500).json(
+          errorResponse('Database connection failed')
+        );
+      }
+      console.log('Database connection test successful');
+    } catch (connectionError) {
+      console.error('Database connection error:', connectionError);
+      return res.status(500).json(
+        errorResponse('Database connection failed')
+      );
+    }
 
     // Get user counts by role
     const { data: users, error: usersError } = await supabase
@@ -389,6 +601,18 @@ const getPlatformStats = async (req, res) => {
       console.error('Get users error:', usersError);
       return res.status(500).json(
         errorResponse('Failed to fetch user statistics')
+      );
+    }
+
+    // Get psychologist counts
+    const { data: psychologists, error: psychologistsError } = await supabase
+      .from('psychologists')
+      .select('id, created_at');
+
+    if (psychologistsError) {
+      console.error('Get psychologists error:', psychologistsError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch psychologist statistics')
       );
     }
 
@@ -410,8 +634,18 @@ const getPlatformStats = async (req, res) => {
       );
     }
 
+    console.log('Data fetched successfully:', {
+      users: users?.length || 0,
+      psychologists: psychologists?.length || 0,
+      sessions: sessions?.length || 0
+    });
+
     // Calculate statistics
     const stats = {
+      totalUsers: users.length,
+      totalDoctors: psychologists.length,
+      totalBookings: sessions.length,
+      totalRevenue: sessions.reduce((sum, session) => sum + parseFloat(session.price || 0), 0),
       users: {
         total: users.length,
         by_role: {}
@@ -450,6 +684,8 @@ const getPlatformStats = async (req, res) => {
         stats.growth.new_sessions_this_month++;
       }
     });
+
+    console.log('Final stats calculated:', stats);
 
     res.json(
       successResponse(stats)
@@ -539,49 +775,33 @@ const createPsychologist = async (req, res) => {
   try {
     console.log('=== createPsychologist function called ===');
     console.log('Request body:', req.body);
-    const { email, password, first_name, last_name, ug_college, pg_college, phd_college, area_of_expertise, description, experience_years } = req.body;
+    const { email, password, first_name, last_name, phone, ug_college, pg_college, phd_college, area_of_expertise, description, experience_years, availability } = req.body;
 
-    // Check if user already exists
-    const { data: existingUser } = await supabase
-      .from('users')
+    // Check if psychologist already exists with this email
+    const { data: existingPsychologist } = await supabase
+      .from('psychologists')
       .select('id')
       .eq('email', email)
       .single();
 
-    if (existingUser) {
+    if (existingPsychologist) {
       return res.status(400).json(
-        errorResponse('User with this email already exists')
+        errorResponse('Psychologist with this email already exists')
       );
     }
 
     // Hash password
     const hashedPassword = await hashPassword(password);
 
-    // Create user
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .insert([{
-        email,
-        password_hash: hashedPassword,
-        role: 'psychologist'
-      }])
-      .select('id, email, role, created_at')
-      .single();
-
-    if (userError) {
-      console.error('User creation error:', userError);
-      return res.status(500).json(
-        errorResponse('Failed to create user account')
-      );
-    }
-
-    // Create psychologist profile
+    // Create psychologist directly in psychologists table (standalone)
     const { data: psychologist, error: psychologistError } = await supabase
       .from('psychologists')
       .insert([{
-        user_id: user.id,
+        email,
+        password_hash: hashedPassword,
         first_name,
         last_name,
+        phone,
         ug_college,
         pg_college,
         phd_college,
@@ -593,21 +813,62 @@ const createPsychologist = async (req, res) => {
       .single();
 
     if (psychologistError) {
-      console.error('Psychologist profile creation error:', psychologistError);
-      // Delete user if profile creation fails
-      await supabase.from('users').delete().eq('id', user.id);
+      console.error('Psychologist creation error:', psychologistError);
       return res.status(500).json(
-        errorResponse('Failed to create psychologist profile')
+        errorResponse('Failed to create psychologist')
       );
+    }
+
+    // Handle availability if provided
+    if (availability && availability.length > 0) {
+      try {
+        const availabilityRecords = [];
+        availability.forEach(item => {
+          // Only create availability for the next occurrence of the selected day (not 2 weeks)
+          const dates = getAvailabilityDatesForDay(item.day, 1); // Create availability for only 1 occurrence
+          dates.forEach(date => {
+            // Only save if there are actual time slots
+            if (item.slots && item.slots.length > 0) {
+              // Use IST date (no timezone conversion needed since we're already in IST)
+              availabilityRecords.push({
+                psychologist_id: psychologist.id,
+                date: date.toISOString().split('T')[0], // Convert to YYYY-MM-DD format
+                time_slots: item.slots // Direct array of time strings as expected by validation
+              });
+            }
+          });
+        });
+
+        if (availabilityRecords.length > 0) {
+          const { error: availabilityError } = await supabase
+            .from('availability')
+            .insert(availabilityRecords);
+
+          if (availabilityError) {
+            console.error('Availability creation error:', availabilityError);
+            // Continue without availability if it fails
+          }
+        }
+      } catch (availabilityError) {
+        console.error('Exception while creating availability:', availabilityError);
+        // Continue without availability if it fails
+      }
     }
 
     res.status(201).json(
       successResponse({
-        user: {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-          profile: psychologist
+        psychologist: {
+          id: psychologist.id,
+          email: psychologist.email,
+          first_name: psychologist.first_name,
+          last_name: psychologist.last_name,
+          phone: psychologist.phone,
+          ug_college: psychologist.ug_college,
+          pg_college: psychologist.pg_college,
+          phd_college: psychologist.phd_college,
+          area_of_expertise: psychologist.area_of_expertise,
+          description: psychologist.description,
+          experience_years: psychologist.experience_years
         }
       }, 'Psychologist created successfully')
     );
@@ -671,10 +932,10 @@ const deletePsychologist = async (req, res) => {
   try {
     const { psychologistId } = req.params;
 
-    // Get psychologist profile
+    // Check if psychologist exists
     const { data: psychologist, error: psychologistError } = await supabase
       .from('psychologists')
-      .select('user_id')
+      .select('id')
       .eq('id', psychologistId)
       .single();
 
@@ -684,7 +945,18 @@ const deletePsychologist = async (req, res) => {
       );
     }
 
-    // Delete psychologist profile first
+    // Delete availability records first
+    const { error: deleteAvailabilityError } = await supabase
+      .from('availability')
+      .delete()
+      .eq('psychologist_id', psychologistId);
+
+    if (deleteAvailabilityError) {
+      console.error('Delete availability error:', deleteAvailabilityError);
+      // Continue with deletion even if availability deletion fails
+    }
+
+    // Delete psychologist profile
     const { error: deleteProfileError } = await supabase
       .from('psychologists')
       .delete()
@@ -694,19 +966,6 @@ const deletePsychologist = async (req, res) => {
       console.error('Delete psychologist profile error:', deleteProfileError);
       return res.status(500).json(
         errorResponse('Failed to delete psychologist profile')
-      );
-    }
-
-    // Delete user account
-    const { error: deleteUserError } = await supabase
-      .from('users')
-      .delete()
-      .eq('id', psychologist.user_id);
-
-    if (deleteUserError) {
-      console.error('Delete user error:', deleteUserError);
-      return res.status(500).json(
-        errorResponse('Failed to delete user account')
       );
     }
 
@@ -913,8 +1172,221 @@ const deleteUser = async (req, res) => {
   }
 };
 
+// Get recent users for dashboard
+const getRecentUsers = async (req, res) => {
+  try {
+    const { limit = 5 } = req.query;
+
+    // Get recent users (clients and admins, not psychologists)
+    const { data: recentUsers, error: usersError } = await supabase
+      .from('users')
+      .select('id, email, role, created_at')
+      .neq('role', 'psychologist') // Exclude psychologists as they're in separate table
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit));
+
+    if (usersError) {
+      console.error('Get recent users error:', usersError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch recent users')
+      );
+    }
+
+    // Get client profiles for users
+    const userIds = recentUsers.filter(user => user.role === 'client').map(user => user.id);
+    let clientProfiles = [];
+    
+    if (userIds.length > 0) {
+      const { data: clients, error: clientsError } = await supabase
+        .from('clients')
+        .select('user_id, first_name, last_name, child_name, child_age')
+        .in('user_id', userIds);
+
+      if (!clientsError && clients) {
+        clientProfiles = clients;
+      }
+    }
+
+    // Enrich user data with profile information
+    const enrichedUsers = recentUsers.map(user => {
+      if (user.role === 'client') {
+        const clientProfile = clientProfiles.find(client => client.user_id === user.id);
+        return {
+          ...user,
+          profile: clientProfile || null
+        };
+      }
+      return user;
+    });
+
+    res.json(
+      successResponse(enrichedUsers)
+    );
+
+  } catch (error) {
+    console.error('Get recent users error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching recent users')
+    );
+  }
+};
+
+// Get recent bookings for dashboard
+const getRecentBookings = async (req, res) => {
+  try {
+    const { limit = 5 } = req.query;
+
+    // Get recent sessions
+    const { data: recentSessions, error: sessionsError } = await supabase
+      .from('sessions')
+      .select(`
+        id,
+        status,
+        scheduled_date,
+        scheduled_time,
+        price,
+        created_at,
+        client:clients(
+          id,
+          first_name,
+          last_name,
+          child_name
+        ),
+        psychologist:psychologists(
+          id,
+          first_name,
+          last_name
+        )
+      `)
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit));
+
+    if (sessionsError) {
+      console.error('Get recent sessions error:', sessionsError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch recent sessions')
+      );
+    }
+
+    res.json(
+      successResponse(recentSessions)
+    );
+
+  } catch (error) {
+    console.error('Get recent bookings error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching recent bookings')
+    );
+  }
+};
+
+// Get recent activities for dashboard
+const getRecentActivities = async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+
+    // Get recent users
+    const { data: recentUsers, error: usersError } = await supabase
+      .from('users')
+      .select('id, email, role, created_at')
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit));
+
+    if (usersError) {
+      console.error('Get recent users error:', usersError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch recent users')
+      );
+    }
+
+    // Get recent psychologists
+    const { data: recentPsychologists, error: psychologistsError } = await supabase
+      .from('psychologists')
+      .select('id, email, first_name, last_name, created_at')
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit));
+
+    if (psychologistsError) {
+      console.error('Get recent psychologists error:', psychologistsError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch recent psychologists')
+      );
+    }
+
+    // Get recent sessions
+    const { data: recentSessions, error: sessionsError } = await supabase
+      .from('sessions')
+      .select('id, status, scheduled_date, created_at')
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit));
+
+    if (sessionsError) {
+      console.error('Get recent sessions error:', sessionsError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch recent sessions')
+      );
+    }
+
+    // Combine and format activities
+    const activities = [];
+
+    // Add user registrations
+    recentUsers.forEach(user => {
+      activities.push({
+        id: `user_${user.id}`,
+        type: 'user_registration',
+        title: `New ${user.role} registered`,
+        description: `${user.email} joined the platform`,
+        timestamp: user.created_at,
+        data: user
+      });
+    });
+
+    // Add psychologist registrations
+    recentPsychologists.forEach(psychologist => {
+      activities.push({
+        id: `psychologist_${psychologist.id}`,
+        type: 'psychologist_registration',
+        title: 'New psychologist joined',
+        description: `Dr. ${psychologist.first_name} ${psychologist.last_name} joined the platform`,
+        timestamp: psychologist.created_at,
+        data: psychologist
+      });
+    });
+
+    // Add session bookings
+    recentSessions.forEach(session => {
+      activities.push({
+        id: `session_${session.id}`,
+        type: 'session_booking',
+        title: 'New session booked',
+        description: `Session scheduled for ${session.scheduled_date}`,
+        timestamp: session.created_at,
+        data: session
+      });
+    });
+
+    // Sort by timestamp (most recent first)
+    activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Return limited number of activities
+    const limitedActivities = activities.slice(0, parseInt(limit));
+
+    res.json(
+      successResponse(limitedActivities)
+    );
+
+  } catch (error) {
+    console.error('Get recent activities error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching recent activities')
+    );
+  }
+};
+
 module.exports = {
   getAllUsers,
+  getAllPsychologists,
   getUserDetails,
   updateUserRole,
   deactivateUser,
@@ -925,5 +1397,8 @@ module.exports = {
   deletePsychologist,
   createUser,
   updateUser,
-  deleteUser
+  deleteUser,
+  getRecentActivities,
+  getRecentUsers,
+  getRecentBookings
 };

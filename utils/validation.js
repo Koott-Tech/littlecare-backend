@@ -13,8 +13,8 @@ const handleValidationErrors = (req, res, next) => {
   next();
 };
 
-// User registration validation
-const validateUserRegistration = [
+// Client registration validation (only clients can register)
+const validateClientRegistration = [
   body('email')
     .isEmail()
     .normalizeEmail()
@@ -22,9 +22,6 @@ const validateUserRegistration = [
   body('password')
     .isLength({ min: 6 })
     .withMessage('Password must be at least 6 characters long'),
-  body('role')
-    .isIn(['client', 'psychologist', 'admin', 'superadmin'])
-    .withMessage('Invalid role specified'),
   handleValidationErrors
 ];
 
@@ -171,7 +168,7 @@ const validateAvailability = [
 
 module.exports = {
   handleValidationErrors,
-  validateUserRegistration,
+  validateClientRegistration,
   validateUserLogin,
   validateClientProfile,
   validatePsychologistProfile,

@@ -158,7 +158,7 @@ const getPlatformAnalytics = async (req, res) => {
         revenue_trends: {}
       },
       psychologists: {
-        by_designation: {},
+        total: psychologists.length,
         expertise_distribution: {},
         performance_metrics: {}
       },
@@ -208,8 +208,6 @@ const getPlatformAnalytics = async (req, res) => {
 
     // Psychologist analytics
     psychologists.forEach(psychologist => {
-
-      
       psychologist.area_of_expertise?.forEach(expertise => {
         analytics.psychologists.expertise_distribution[expertise] = (analytics.psychologists.expertise_distribution[expertise] || 0) + 1;
       });

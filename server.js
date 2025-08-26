@@ -49,74 +49,147 @@ app.get('/health', (req, res) => {
   });
 });
 
+// TEMPORARY TEST ENDPOINT - Create test psychologist
+app.post('/api/test/create-psychologist', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    const { hashPassword } = require('./utils/helpers');
+    
+                    const testPsychologist = {
+                  email: 'test@example.com',
+                  password: 'password123',
+                  first_name: 'Test',
+                  last_name: 'Doctor',
+                  phone: '+1234567890',
+                  ug_college: 'University of Psychology',
+                  pg_college: 'Graduate School of Mental Health',
+                  phd_college: 'Doctoral Institute of Psychology',
+                  area_of_expertise: ['Anxiety', 'Depression', 'Trauma'],
+                  description: 'Experienced psychologist specializing in anxiety and depression treatment.',
+                  experience_years: 8
+                };
+
+    // Check if psychologist already exists
+    const { data: existingPsychologist } = await supabase
+      .from('psychologists')
+      .select('id')
+      .eq('email', testPsychologist.email)
+      .single();
+
+    if (existingPsychologist) {
+      return res.status(200).json({
+        success: true,
+        message: 'Test psychologist already exists',
+        data: {
+          email: testPsychologist.email,
+          password: testPsychologist.password
+        }
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await hashPassword(testPsychologist.password);
+
+    // Create psychologist in psychologists table
+    const { data: psychologist, error: psychologistError } = await supabase
+      .from('psychologists')
+      .insert([{
+        email: testPsychologist.email,
+        password_hash: hashedPassword,
+        first_name: testPsychologist.first_name,
+        last_name: testPsychologist.last_name,
+        phone: testPsychologist.phone,
+        ug_college: testPsychologist.ug_college,
+        pg_college: testPsychologist.pg_college,
+        phd_college: testPsychologist.phd_college,
+        area_of_expertise: testPsychologist.area_of_expertise,
+        description: testPsychologist.description,
+        experience_years: testPsychologist.experience_years
+      }])
+      .select('*')
+      .single();
+
+    if (psychologistError) {
+      console.error('Test psychologist creation error:', psychologistError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create test psychologist',
+        error: psychologistError.message
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Test psychologist created successfully',
+      data: {
+        email: testPsychologist.email,
+        password: testPsychologist.password,
+        id: psychologist.id
+      }
+    });
+
+  } catch (error) {
+    console.error('Test psychologist creation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Public endpoint to get all psychologists (no authentication required)
 app.get('/api/public/psychologists', async (req, res) => {
   try {
     const supabase = require('./config/supabase');
 
-                // Fetch psychologists with their details
-            const { data: psychologists, error: psychologistsError } = await supabase
-              .from('psychologists')
-              .select(`
-                id,
-                user_id,
-                first_name,
-                last_name,
-                area_of_expertise,
-                description,
-                experience_years
-              `)
-              .order('created_at', { ascending: false });
+    // Fetch psychologists directly from psychologists table
+    const { data: psychologists, error: psychologistsError } = await supabase
+      .from('psychologists')
+      .select(`
+        id,
+        email,
+        first_name,
+        last_name,
+        area_of_expertise,
+        description,
+        experience_years,
+        ug_college,
+        pg_college,
+        phd_college,
+        phone,
+        cover_image_url,
+        created_at
+      `)
+      .order('created_at', { ascending: false });
 
     if (psychologistsError) {
       console.error('Error fetching psychologists:', psychologistsError);
       throw new Error('Failed to fetch psychologists');
     }
 
-    // Fetch user details (email, etc.) for all psychologists
-    const userIds = psychologists.map(psych => psych.user_id);
-    const { data: users, error: usersError } = await supabase
-      .from('users')
-      .select('id, email, created_at')
-      .in('id', userIds);
-
-    if (usersError) {
-      console.error('Error fetching users:', usersError);
-      throw new Error('Failed to fetch users');
-    }
-
-    // Create a map of users by id for easy lookup
-    const usersMap = {};
-    users.forEach(user => {
-      usersMap[user.id] = user;
-    });
-
-                // Combine psychologist and user data
-            const combinedPsychologists = psychologists.map(psych => {
-              const user = usersMap[psych.user_id] || {};
-              return {
-                id: psych.id,
-                name: `${psych.first_name} ${psych.last_name}`.trim(),
-                first_name: psych.first_name,
-                last_name: psych.last_name,
-                email: user.email,
-                phone: 'N/A', // Phone number not available in current schema
-
-                area_of_expertise: psych.area_of_expertise || [],
-                experience_years: psych.experience_years || 0,
-                ug_college: 'N/A', // Not available in current schema
-                pg_college: 'N/A', // Not available in current schema
-                phd_college: 'N/A', // Not available in current schema
-                description: psych.description || 'Professional psychologist dedicated to helping clients achieve mental wellness.',
-                profile_picture_url: null, // Not available in current schema
-                cover_image_url: null // Not available in current schema
-              };
-            });
+    // Format the response
+    const formattedPsychologists = psychologists.map(psych => ({
+      id: psych.id,
+      name: `${psych.first_name} ${psych.last_name}`.trim(),
+      first_name: psych.first_name,
+      last_name: psych.last_name,
+      email: psych.email,
+      phone: psych.phone || 'N/A',
+      area_of_expertise: psych.area_of_expertise || [],
+      experience_years: psych.experience_years || 0,
+      ug_college: psych.ug_college || 'N/A',
+      pg_college: psych.pg_college || 'N/A',
+      phd_college: psych.phd_college || 'N/A',
+      description: psych.description || 'Professional psychologist dedicated to helping clients achieve mental wellness.',
+      profile_picture_url: null,
+      cover_image_url: psych.cover_image_url
+    }));
 
     res.json({
       success: true,
       data: {
-        psychologists: combinedPsychologists
+        psychologists: formattedPsychologists
       }
     });
   } catch (error) {
@@ -124,6 +197,50 @@ app.get('/api/public/psychologists', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch psychologists',
+      message: error.message
+    });
+  }
+});
+
+// Public endpoint to get psychologist availability (no authentication required)
+app.get('/api/public/psychologists/:id/availability', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    const { id } = req.params;
+
+    // Fetch availability for the specific psychologist
+    const { data: availability, error: availabilityError } = await supabase
+      .from('availability')
+      .select('*')
+      .eq('psychologist_id', id)
+      .order('date', { ascending: true });
+
+    if (availabilityError) {
+      console.error('Error fetching psychologist availability:', availabilityError);
+      throw new Error('Failed to fetch psychologist availability');
+    }
+
+    // Format the availability data for the frontend
+    const formattedAvailability = {};
+    availability.forEach(avail => {
+      const dateStr = avail.date;
+      formattedAvailability[dateStr] = {
+        available: avail.is_available !== false,
+        timeSlots: avail.time_slots || []
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        availability: formattedAvailability
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching psychologist availability:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch psychologist availability',
       message: error.message
     });
   }

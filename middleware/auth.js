@@ -14,23 +14,59 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
+    console.log('Token received:', token.substring(0, 20) + '...');
     
-    // Get user from database to ensure they still exist
-    const { data: user, error } = await supabase
-      .from('users')
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('Decoded token:', decoded);
+    
+    // Check if decoded has userId or id
+    const userId = decoded.userId || decoded.id;
+    if (!userId) {
+      console.error('Token missing userId:', decoded);
+      return res.status(401).json({ 
+        error: 'Invalid token structure', 
+        message: 'Token missing user ID' 
+      });
+    }
+    
+    // Check if it's a psychologist first (since login checks psychologists table first)
+    const { data: psychologist, error: psychologistError } = await supabase
+      .from('psychologists')
       .select('*')
-      .eq('id', decoded.userId)
+      .eq('id', userId)
       .single();
 
-    if (error || !user) {
+    if (psychologist && !psychologistError) {
+      // Psychologist exists in psychologists table (standalone)
+      req.user = {
+        id: psychologist.id,
+        email: psychologist.email,
+        role: 'psychologist',
+        created_at: psychologist.created_at,
+        updated_at: psychologist.updated_at
+      };
+      return next();
+    }
+
+    // If not a psychologist, check users table for clients/admins
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (userError || !user) {
+      console.error('User not found in either table:', { userId, userError, psychologistError });
       return res.status(401).json({ 
         error: 'Access denied', 
         message: 'Invalid token' 
       });
     }
 
+    // User exists in users table (client, admin, superadmin)
     req.user = user;
+
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {

@@ -27,7 +27,8 @@ const getAllSessions = async (req, res) => {
           id,
           first_name,
           last_name,
-          area_of_expertise
+          area_of_expertise,
+          email
         ),
         package:packages(
           id,
@@ -110,7 +111,8 @@ const getSessionById = async (req, res) => {
           first_name,
           last_name,
           area_of_expertise,
-          description
+          description,
+          email
         ),
         package:packages(
           id,
@@ -378,7 +380,8 @@ const searchSessions = async (req, res) => {
         psychologist:psychologists(
           id,
           first_name,
-          last_name
+          last_name,
+          email
         ),
         package:packages(
           id,

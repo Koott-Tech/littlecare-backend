@@ -7,10 +7,10 @@ const {
   errorResponse
 } = require('../utils/helpers');
 
-// User registration
-const register = async (req, res) => {
+// Client registration (only clients can register themselves)
+const registerClient = async (req, res) => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password } = req.body;
 
     // Check if user already exists
     const { data: existingUser } = await supabase
@@ -28,13 +28,13 @@ const register = async (req, res) => {
     // Hash password
     const hashedPassword = await hashPassword(password);
 
-    // Create user
+    // Create user with client role (minimal account)
     const { data: user, error: userError } = await supabase
       .from('users')
       .insert([{
         email,
         password_hash: hashedPassword,
-        role
+        role: 'client' // Always set role to client for self-registration
       }])
       .select('id, email, role, created_at')
       .single();
@@ -46,57 +46,27 @@ const register = async (req, res) => {
       );
     }
 
-    // Create role-specific profile
-    let profileData = null;
-    if (role === 'client') {
-      const { data: client, error: clientError } = await supabase
-        .from('clients')
-        .insert([{
-          user_id: user.id,
-          first_name: req.body.first_name,
-          last_name: req.body.last_name,
-          phone_number: req.body.phone_number,
-          child_name: req.body.child_name,
-          child_age: req.body.child_age
-        }])
-        .select('*')
-        .single();
+    // Create minimal client profile (empty for now)
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .insert([{
+        user_id: user.id,
+        first_name: 'Pending', // Default value instead of null
+        last_name: 'Pending',  // Default value instead of null
+        phone_number: 'Pending', // Default value instead of null
+        child_name: 'Pending',   // Default value instead of null
+        child_age: 0             // Default value instead of null
+      }])
+      .select('*')
+      .single();
 
-      if (clientError) {
-        console.error('Client profile creation error:', clientError);
-        // Delete user if profile creation fails
-        await supabase.from('users').delete().eq('id', user.id);
-        return res.status(500).json(
-          errorResponse('Failed to create client profile')
-        );
-      }
-      profileData = client;
-    } else if (role === 'psychologist') {
-      const { data: psychologist, error: psychologistError } = await supabase
-        .from('psychologists')
-        .insert([{
-          user_id: user.id,
-          first_name: req.body.first_name,
-          last_name: req.body.last_name,
-          ug_college: req.body.ug_college,
-          pg_college: req.body.pg_college,
-          phd_college: req.body.phd_college,
-          designation: req.body.designation,
-          area_of_expertise: req.body.area_of_expertise,
-          description: req.body.description
-        }])
-        .select('*')
-        .single();
-
-      if (psychologistError) {
-        console.error('Psychologist profile creation error:', psychologistError);
-        // Delete user if profile creation fails
-        await supabase.from('users').delete().eq('id', user.id);
-        return res.status(500).json(
-          errorResponse('Failed to create psychologist profile')
-        );
-      }
-      profileData = psychologist;
+    if (clientError) {
+      console.error('Client profile creation error:', clientError);
+      // Delete user if profile creation fails
+      await supabase.from('users').delete().eq('id', user.id);
+      return res.status(500).json(
+        errorResponse('Failed to create client profile')
+      );
     }
 
     // Generate JWT token
@@ -108,14 +78,14 @@ const register = async (req, res) => {
           id: user.id,
           email: user.email,
           role: user.role,
-          profile: profileData
+          profile: client
         },
         token
-      }, 'User registered successfully')
+      }, 'Client account created successfully with default profile values. Please complete your profile information.')
     );
 
   } catch (error) {
-    console.error('Registration error:', error);
+    console.error('Client registration error:', error);
     res.status(500).json(
       errorResponse('Internal server error during registration')
     );
@@ -127,7 +97,41 @@ const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user by email
+    // First check if it's a psychologist
+    const { data: psychologist, error: psychologistError } = await supabase
+      .from('psychologists')
+      .select('*')
+      .eq('email', email)
+      .single();
+
+    if (psychologist && !psychologistError) {
+      // Verify password for psychologist
+      const isValidPassword = await comparePassword(password, psychologist.password_hash);
+      if (!isValidPassword) {
+        return res.status(401).json(
+          errorResponse('Invalid email or password')
+        );
+      }
+
+      // Generate JWT token for psychologist
+      const token = generateToken(psychologist.id, 'psychologist');
+
+      res.json(
+        successResponse({
+          user: {
+            id: psychologist.id,
+            email: psychologist.email,
+            role: 'psychologist',
+            profile_picture_url: null,
+            profile: psychologist
+          },
+          token
+        }, 'Login successful')
+      );
+      return;
+    }
+
+    // If not a psychologist, check users table for clients/admins
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('*')
@@ -157,13 +161,6 @@ const login = async (req, res) => {
         .eq('user_id', user.id)
         .single();
       profile = client;
-    } else if (user.role === 'psychologist') {
-      const { data: psychologist } = await supabase
-        .from('psychologists')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-      profile = psychologist;
     }
 
     // Generate JWT token
@@ -194,21 +191,24 @@ const login = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userRole = req.user.role;
 
-    // Get user with profile
+    // Get user with profile based on role
     let profile = null;
-    if (req.user.role === 'client') {
+    
+    if (userRole === 'client') {
       const { data: client } = await supabase
         .from('clients')
         .select('*')
         .eq('user_id', userId)
         .single();
       profile = client;
-    } else if (req.user.role === 'psychologist') {
+    } else if (userRole === 'psychologist') {
+      // For psychologists, the profile is the user data itself
       const { data: psychologist } = await supabase
         .from('psychologists')
         .select('*')
-        .eq('user_id', userId)
+        .eq('id', userId)
         .single();
       profile = psychologist;
     }
@@ -219,7 +219,7 @@ const getProfile = async (req, res) => {
           id: req.user.id,
           email: req.user.email,
           role: req.user.role,
-          profile_picture_url: req.user.profile_picture_url,
+          profile_picture_url: req.user.profile_picture_url || null,
           profile
         }
       })
@@ -356,11 +356,59 @@ const logout = async (req, res) => {
   }
 };
 
+// Get registration information
+const getRegistrationInfo = async (req, res) => {
+  try {
+    const info = {
+      message: 'Registration Information',
+      policies: {
+        clients: {
+          canRegister: true,
+          description: 'Clients can create accounts by providing email, password, and profile information.',
+          requiredFields: ['email', 'password', 'first_name', 'last_name', 'phone_number', 'child_name', 'child_age'],
+          endpoint: '/api/auth/register/client'
+        },
+        psychologists: {
+          canRegister: false,
+          description: 'Psychologist accounts are created by administrators only. Please contact support for access.',
+          note: 'If you are a qualified psychologist, please contact the platform administrators.'
+        },
+        admins: {
+          canRegister: false,
+          description: 'Admin accounts are created by superadmins only.',
+          note: 'Administrative access is granted by platform superadmins.'
+        },
+        superadmins: {
+          canRegister: false,
+          description: 'Superadmin accounts are created during system setup only.',
+          note: 'Superadmin access is restricted to system administrators.'
+        }
+      },
+      generalInfo: {
+        loginEndpoint: '/api/auth/login',
+        supportedRoles: ['client', 'psychologist', 'admin', 'superadmin'],
+        note: 'All user types can log in once their accounts are created.'
+      }
+    };
+
+    res.json(
+      successResponse(info)
+    );
+
+  } catch (error) {
+    console.error('Get registration info error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching registration information')
+    );
+  }
+};
+
 module.exports = {
-  register,
+  registerClient,
   login,
   getProfile,
   updateProfilePicture,
   changePassword,
-  logout
+  logout,
+  getRegistrationInfo
 };
