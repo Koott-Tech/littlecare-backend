@@ -424,6 +424,111 @@ const updateAvailability = async (req, res) => {
   }
 };
 
+// Add new availability
+const addAvailability = async (req, res) => {
+  try {
+    const psychologistId = req.user.id;
+    const { date, time_slots, is_available = true } = req.body;
+
+    // Validate required fields
+    if (!date || !time_slots || time_slots.length === 0) {
+      return res.status(400).json(
+        errorResponse('Date and time slots are required')
+      );
+    }
+
+    // Check if availability already exists for this date
+    const { data: existingAvailability } = await supabase
+      .from('availability')
+      .select('id')
+      .eq('psychologist_id', psychologistId)
+      .eq('date', date)
+      .single();
+
+    if (existingAvailability) {
+      return res.status(400).json(
+        errorResponse('Availability already exists for this date. Use update instead.')
+      );
+    }
+
+    // Create new availability
+    const { data: newAvailability, error } = await supabase
+      .from('availability')
+      .insert([{
+        psychologist_id: psychologistId,
+        date,
+        time_slots,
+        is_available,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Create availability error:', error);
+      return res.status(500).json(
+        errorResponse('Failed to create availability')
+      );
+    }
+
+    res.status(201).json(
+      successResponse(newAvailability, 'Availability created successfully')
+    );
+
+  } catch (error) {
+    console.error('Add availability error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while creating availability')
+    );
+  }
+};
+
+// Delete availability
+const deleteAvailability = async (req, res) => {
+  try {
+    const psychologistId = req.user.id;
+    const availabilityId = req.params.availabilityId;
+
+    // Check if availability exists and belongs to this psychologist
+    const { data: existingAvailability, error: checkError } = await supabase
+      .from('availability')
+      .select('id')
+      .eq('id', availabilityId)
+      .eq('psychologist_id', psychologistId)
+      .single();
+
+    if (checkError || !existingAvailability) {
+      return res.status(404).json(
+        errorResponse('Availability not found or access denied')
+      );
+    }
+
+    // Delete the availability
+    const { error: deleteError } = await supabase
+      .from('availability')
+      .delete()
+      .eq('id', availabilityId);
+
+    if (deleteError) {
+      console.error('Delete availability error:', deleteError);
+      return res.status(500).json(
+        errorResponse('Failed to delete availability')
+      );
+    }
+
+    res.json(
+      successResponse(null, 'Availability deleted successfully')
+    );
+
+  } catch (error) {
+    console.error('Delete availability error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while deleting availability')
+    );
+  }
+};
+
 // Get packages
 const getPackages = async (req, res) => {
   try {
@@ -620,7 +725,9 @@ module.exports = {
   getSessions,
   updateSession,
   getAvailability,
+  addAvailability,
   updateAvailability,
+  deleteAvailability,
   getPackages,
   createPackage,
   updatePackage,

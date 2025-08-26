@@ -22,7 +22,9 @@ router.put('/sessions/:sessionId', psychologistController.updateSession);
 
 // Availability management
 router.get('/availability', psychologistController.getAvailability);
+router.post('/availability', validateAvailability, psychologistController.addAvailability);
 router.put('/availability', validateAvailability, psychologistController.updateAvailability);
+router.delete('/availability/:availabilityId', psychologistController.deleteAvailability);
 
 // Package management
 router.get('/packages', psychologistController.getPackages);
