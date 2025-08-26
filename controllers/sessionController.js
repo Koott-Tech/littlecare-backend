@@ -108,6 +108,16 @@ const bookSession = async (req, res) => {
 // Get all sessions (admin only)
 const getAllSessions = async (req, res) => {
   try {
+    console.log('getAllSessions called with user:', req.user);
+    
+    // Check if user is admin
+    if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'superadmin')) {
+      console.log('Access denied - user role:', req.user?.role);
+      return res.status(403).json(
+        errorResponse('Access denied. Admin role required.')
+      );
+    }
+
     const { page = 1, limit = 10, status, psychologist_id, client_id, date, sort = 'created_at', order = 'desc' } = req.query;
 
     let query = supabase
@@ -120,7 +130,10 @@ const getAllSessions = async (req, res) => {
           last_name,
           child_name,
           child_age,
-          phone_number
+          phone_number,
+          user:users(
+            email
+          )
         ),
         psychologist:psychologists(
           id,
@@ -128,14 +141,10 @@ const getAllSessions = async (req, res) => {
           last_name,
           area_of_expertise,
           email
-        ),
-        package:packages(
-          id,
-          package_type,
-          price,
-          description
         )
       `);
+
+    console.log('Supabase query built, executing...');
 
     // Apply filters
     if (status) {
@@ -160,7 +169,9 @@ const getAllSessions = async (req, res) => {
     const offset = (page - 1) * limit;
     query = query.range(offset, offset + limit - 1);
 
+    console.log('Executing query with filters and pagination...');
     const { data: sessions, error, count } = await query;
+    console.log('Query result:', { sessionsCount: sessions?.length, error, count });
 
     if (error) {
       console.error('Get all sessions error:', error);
@@ -802,15 +813,10 @@ const deleteSession = async (req, res) => {
 };
 
 module.exports = {
-  getAllSessions,
-  getSessionById,
-  updateSessionStatus,
-  rescheduleSession,
-  getSessionStats,
-  searchSessions,
-  createSession,
-  deleteSession,
   bookSession,
   getClientSessions,
-  getPsychologistSessions
+  getPsychologistSessions,
+  getAllSessions,
+  updateSessionStatus,
+  deleteSession
 };

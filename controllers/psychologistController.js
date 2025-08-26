@@ -163,7 +163,10 @@ const getSessions = async (req, res) => {
             last_name,
             child_name,
             child_age,
-            phone_number
+            phone_number,
+            user:users(
+              email
+            )
           )
         `)
         .eq('psychologist_id', psychologistId);
