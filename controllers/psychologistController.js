@@ -164,12 +164,6 @@ const getSessions = async (req, res) => {
             child_name,
             child_age,
             phone_number
-          ),
-          package:packages(
-            id,
-            package_type,
-            price,
-            description
           )
         `)
         .eq('psychologist_id', psychologistId);
@@ -184,9 +178,9 @@ const getSessions = async (req, res) => {
         query = query.eq('scheduled_date', date);
       }
 
-      // Add pagination
+      // Add pagination and ordering
       const offset = (page - 1) * limit;
-      query = query.range(offset, offset + limit - 1);
+      query = query.range(offset, offset + limit - 1).order('scheduled_date', { ascending: false });
 
       const { data: sessions, error, count } = await query;
 

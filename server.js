@@ -202,6 +202,360 @@ app.get('/api/public/psychologists', async (req, res) => {
   }
 });
 
+// TEMPORARY: Check database contents (for debugging)
+app.get('/api/debug/users', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    
+    // Check users table
+    const { data: users, error: usersError } = await supabase
+      .from('users')
+      .select('*');
+    
+    // Check clients table
+    const { data: clients, error: clientsError } = await supabase
+      .from('clients')
+      .select('*');
+    
+    // Check psychologists table
+    const { data: psychologists, error: psychologistsError } = await supabase
+      .from('psychologists')
+      .select('*');
+
+    res.json({
+      success: true,
+      data: {
+        users: users || [],
+        clients: clients || [],
+        psychologists: psychologists || [],
+        errors: {
+          users: usersError?.message,
+          clients: clientsError?.message,
+          psychologists: psychologistsError?.message
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// TEMPORARY: Create test psychologist user (for debugging)
+app.post('/api/debug/create-psychologist', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    const { hashPassword } = require('./utils/helpers');
+    
+    const testPsychologist = {
+      email: 'testpsychologist@test.com',
+      password: 'psych123',
+      first_name: 'Dr. Sarah',
+      last_name: 'Johnson',
+      phone: '+1234567890',
+      ug_college: 'University of Psychology',
+      pg_college: 'Graduate School of Mental Health',
+      phd_college: 'Doctoral Institute of Psychology',
+      area_of_expertise: ['Anxiety', 'Depression', 'Trauma'],
+      description: 'Experienced psychologist specializing in anxiety and depression treatment.',
+      experience_years: 8
+    };
+
+    // Check if psychologist already exists
+    const { data: existingPsychologist } = await supabase
+      .from('psychologists')
+      .select('id')
+      .eq('email', testPsychologist.email)
+      .single();
+
+    if (existingPsychologist) {
+      return res.status(200).json({
+        success: true,
+        message: 'Test psychologist already exists',
+        data: {
+          email: testPsychologist.email,
+          password: testPsychologist.password,
+          role: 'psychologist'
+        }
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await hashPassword(testPsychologist.password);
+
+    // Create psychologist
+    const { data: psychologist, error: psychologistError } = await supabase
+      .from('psychologists')
+      .insert([{
+        email: testPsychologist.email,
+        password_hash: hashedPassword,
+        first_name: testPsychologist.first_name,
+        last_name: testPsychologist.last_name,
+        phone: testPsychologist.phone,
+        ug_college: testPsychologist.ug_college,
+        pg_college: testPsychologist.pg_college,
+        phd_college: testPsychologist.phd_college,
+        area_of_expertise: testPsychologist.area_of_expertise,
+        description: testPsychologist.description,
+        experience_years: testPsychologist.experience_years,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      .select('id, email, first_name, last_name, created_at')
+      .single();
+
+    if (psychologistError) {
+      console.error('Psychologist creation error:', psychologistError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create psychologist user'
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Test psychologist created successfully',
+      data: {
+        id: psychologist.id,
+        email: testPsychologist.email,
+        password: testPsychologist.password,
+        role: 'psychologist',
+        name: `${testPsychologist.first_name} ${testPsychologist.last_name}`
+      }
+    });
+
+  } catch (error) {
+    console.error('Create psychologist error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// TEMPORARY: Create test client user (for debugging)
+app.post('/api/debug/create-client', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    const { hashPassword } = require('./utils/helpers');
+    
+    const testClient = {
+      email: 'testclient@test.com',
+      password: 'client123',
+      first_name: 'John',
+      last_name: 'Doe',
+      phone: '+1987654321',
+      child_name: 'Emma',
+      child_age: 12
+    };
+
+    // Check if client already exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', testClient.email)
+      .single();
+
+    if (existingUser) {
+      return res.status(200).json({
+        success: true,
+        message: 'Test client already exists',
+        data: {
+          email: testClient.email,
+          password: testClient.password,
+          role: 'client'
+        }
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await hashPassword(testClient.password);
+
+    // Create user with client role
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .insert([{
+        email: testClient.email,
+        password_hash: hashedPassword,
+        role: 'client',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      .select('id, email, role, created_at')
+      .single();
+
+    if (userError) {
+      console.error('User creation error:', userError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create user account'
+      });
+    }
+
+    // Create client profile
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .insert([{
+        user_id: user.id,
+        first_name: testClient.first_name,
+        last_name: testClient.last_name,
+        phone_number: testClient.phone,
+        child_name: testClient.child_name,
+        child_age: testClient.child_age,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      .select('*')
+      .single();
+
+    if (clientError) {
+      console.error('Client profile creation error:', clientError);
+      // Delete user if profile creation fails
+      await supabase.from('users').delete().eq('id', user.id);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create client profile'
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Test client created successfully',
+      data: {
+        id: user.id,
+        email: testClient.email,
+        password: testClient.password,
+        role: 'client',
+        name: `${testClient.first_name} ${testClient.last_name}`
+      }
+    });
+
+  } catch (error) {
+    console.error('Create client error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// TEMPORARY: Create test admin user (for debugging)
+app.post('/api/debug/create-admin', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    const { hashPassword } = require('./utils/helpers');
+    
+    const testAdmin = {
+      email: 'newadmin@test.com',
+      password: 'admin123',
+      first_name: 'Test',
+      last_name: 'Admin',
+      role: 'admin'
+    };
+
+    // Check if admin already exists
+    const { data: existingAdmin } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', testAdmin.email)
+      .single();
+
+    if (existingAdmin) {
+      return res.status(200).json({
+        success: true,
+        message: 'Test admin already exists',
+        data: {
+          email: testAdmin.email,
+          password: testAdmin.password,
+          role: testAdmin.role
+        }
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await hashPassword(testAdmin.password);
+
+    // Create admin user
+    const { data: admin, error: adminError } = await supabase
+      .from('users')
+      .insert([{
+        email: testAdmin.email,
+        password_hash: hashedPassword,
+        role: testAdmin.role,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      .select('id, email, role, created_at')
+      .single();
+
+    if (adminError) {
+      console.error('Admin creation error:', adminError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create admin user'
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Test admin created successfully',
+      data: {
+        id: admin.id,
+        email: testAdmin.email,
+        password: testAdmin.password,
+        role: testAdmin.role
+      }
+    });
+
+  } catch (error) {
+    console.error('Create admin error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// TEMPORARY: Clear test data (for debugging)
+app.delete('/api/debug/clear-test-data', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    
+    // Clear test data from all tables
+    const { error: usersError } = await supabase
+      .from('users')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000'); // Keep system IDs
+    
+    const { error: clientsError } = await supabase
+      .from('clients')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    
+    const { error: psychologistsError } = await supabase
+      .from('psychologists')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+
+    res.json({
+      success: true,
+      message: 'Test data cleared successfully',
+      errors: {
+        users: usersError?.message,
+        clients: clientsError?.message,
+        psychologists: psychologistsError?.message
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Public endpoint to get psychologist availability (no authentication required)
 app.get('/api/public/psychologists/:id/availability', async (req, res) => {
   try {

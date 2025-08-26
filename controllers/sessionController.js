@@ -6,6 +6,105 @@ const {
   formatTime
 } = require('../utils/helpers');
 
+// Book a new session
+const bookSession = async (req, res) => {
+  try {
+    const { psychologist_id, scheduled_date, scheduled_time, price } = req.body;
+
+    // Validate required fields
+    if (!psychologist_id || !scheduled_date || !scheduled_time) {
+      return res.status(400).json(
+        errorResponse('Missing required fields: psychologist_id, scheduled_date, scheduled_time')
+      );
+    }
+
+    // Get client_id from authenticated user
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Check if user is a client
+    if (userRole !== 'client') {
+      return res.status(403).json(
+        errorResponse('Only clients can book sessions')
+      );
+    }
+
+    // Get client profile from clients table
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (clientError || !client) {
+      console.error('Client profile not found:', clientError);
+      return res.status(404).json(
+        errorResponse('Client profile not found. Please complete your profile first.')
+      );
+    }
+
+    const clientId = client.id;
+
+    // Check if the time slot is still available
+    const { data: existingSession, error: checkError } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('psychologist_id', psychologist_id)
+      .eq('scheduled_date', scheduled_date)
+      .eq('scheduled_time', scheduled_time)
+      .eq('status', 'booked')
+      .single();
+
+    if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = no rows returned
+      console.error('Error checking session availability:', checkError);
+      return res.status(500).json(
+        errorResponse('Failed to check session availability')
+      );
+    }
+
+    if (existingSession) {
+      return res.status(400).json(
+        errorResponse('This time slot is already booked')
+      );
+    }
+
+    // Create the session
+    const { data: session, error: createError } = await supabase
+      .from('sessions')
+      .insert({
+        client_id: clientId,
+        psychologist_id,
+        scheduled_date,
+        scheduled_time,
+        status: 'booked',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (createError) {
+      console.error('Create session error:', createError);
+      return res.status(500).json(
+        errorResponse('Failed to create session')
+      );
+    }
+
+    res.status(201).json(
+      successResponse({
+        session,
+        message: 'Session booked successfully'
+      })
+    );
+
+  } catch (error) {
+    console.error('Book session error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while booking session')
+    );
+  }
+};
+
 // Get all sessions (admin only)
 const getAllSessions = async (req, res) => {
   try {
@@ -85,6 +184,119 @@ const getAllSessions = async (req, res) => {
     console.error('Get all sessions error:', error);
     res.status(500).json(
       errorResponse('Internal server error while fetching sessions')
+    );
+  }
+};
+
+// Get sessions for a specific client
+const getClientSessions = async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { page = 1, limit = 10, status } = req.query;
+
+    let query = supabase
+      .from('sessions')
+      .select(`
+        *,
+        psychologist:psychologists(
+          id,
+          first_name,
+          last_name,
+          area_of_expertise,
+          email
+        )
+      `)
+      .eq('client_id', clientId);
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    // Apply pagination
+    const offset = (page - 1) * limit;
+    query = query.range(offset, offset + limit - 1).order('scheduled_date', { ascending: false });
+
+    const { data: sessions, error, count } = await query;
+
+    if (error) {
+      console.error('Get client sessions error:', error);
+      return res.status(500).json(
+        errorResponse('Failed to fetch client sessions')
+      );
+    }
+
+    res.json(
+      successResponse({
+        sessions,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: count || sessions.length
+        }
+      })
+    );
+
+  } catch (error) {
+    console.error('Get client sessions error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching client sessions')
+    );
+  }
+};
+
+// Get sessions for a specific psychologist
+const getPsychologistSessions = async (req, res) => {
+  try {
+    const { psychologistId } = req.params;
+    const { page = 1, limit = 10, status } = req.query;
+
+    let query = supabase
+      .from('sessions')
+      .select(`
+        *,
+        client:clients(
+          id,
+          first_name,
+          last_name,
+          child_name,
+          child_age,
+          phone_number
+        )
+      `)
+      .eq('psychologist_id', psychologistId);
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    // Apply pagination
+    const offset = (page - 1) * limit;
+    query = query.range(offset, offset + limit - 1).order('scheduled_date', { ascending: false });
+
+    const { data: sessions, error, count } = await query;
+
+    if (error) {
+      console.error('Get psychologist sessions error:', error);
+      return res.status(500).json(
+        errorResponse('Failed to fetch psychologist sessions')
+      );
+    }
+
+    res.json(
+      successResponse({
+        sessions,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: count || sessions.length
+        }
+      })
+    );
+
+  } catch (error) {
+    console.error('Get psychologist sessions error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching psychologist sessions')
     );
   }
 };
@@ -597,5 +809,8 @@ module.exports = {
   getSessionStats,
   searchSessions,
   createSession,
-  deleteSession
+  deleteSession,
+  bookSession,
+  getClientSessions,
+  getPsychologistSessions
 };
