@@ -722,6 +722,87 @@ const deletePackage = async (req, res) => {
   }
 };
 
+// Respond to reschedule request
+const respondToRescheduleRequest = async (req, res) => {
+  try {
+    const psychologistId = req.user.id;
+    const { sessionId } = req.params;
+    const { action, newDate, newTime, reason } = req.body; // action: 'approve' or 'reject'
+
+    // Check if session exists and belongs to psychologist
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .eq('psychologist_id', psychologistId)
+      .single();
+
+    if (!session) {
+      return res.status(404).json(
+        errorResponse('Session not found')
+      );
+    }
+
+    // Check if session has reschedule request
+    if (session.status !== 'reschedule_requested') {
+      return res.status(400).json(
+        errorResponse('No reschedule request found for this session')
+      );
+    }
+
+    let updateData = {
+      updated_at: new Date().toISOString()
+    };
+
+    if (action === 'approve') {
+      // Validate new date and time
+      if (!newDate || !newTime) {
+        return res.status(400).json(
+          errorResponse('New date and time are required when approving reschedule')
+        );
+      }
+
+      // Update session date and time and change status back to booked
+      updateData.scheduled_date = newDate;
+      updateData.scheduled_time = newTime;
+      updateData.status = 'booked';
+
+    } else if (action === 'reject') {
+      // Change status back to booked (rejected)
+      updateData.status = 'booked';
+    } else {
+      return res.status(400).json(
+        errorResponse('Invalid action. Must be "approve" or "reject"')
+      );
+    }
+
+    // Update session
+    const { data: updatedSession, error } = await supabase
+      .from('sessions')
+      .update(updateData)
+      .eq('id', sessionId)
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Update session error:', error);
+      return res.status(500).json(
+        errorResponse('Failed to update session')
+      );
+    }
+
+    res.json(
+      successResponse(updatedSession, `Reschedule request ${action}ed successfully`)
+    );
+
+  } catch (error) {
+    console.error('Respond to reschedule request error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while responding to reschedule request')
+    );
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -734,5 +815,6 @@ module.exports = {
   getPackages,
   createPackage,
   updatePackage,
-  deletePackage
+  deletePackage,
+  respondToRescheduleRequest
 };

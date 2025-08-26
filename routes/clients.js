@@ -18,6 +18,7 @@ router.put('/profile', validateClientProfile, clientController.updateProfile);
 router.get('/sessions', clientController.getSessions);
 router.post('/book-session', clientController.bookSession);
 router.put('/sessions/:sessionId/cancel', clientController.cancelSession);
+router.post('/sessions/:sessionId/reschedule-request', clientController.requestReschedule);
 
 // Psychologist discovery
 router.get('/psychologists', clientController.getAvailablePsychologists);

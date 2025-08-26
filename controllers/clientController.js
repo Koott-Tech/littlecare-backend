@@ -392,6 +392,77 @@ const cancelSession = async (req, res) => {
   }
 };
 
+// Request reschedule for a session
+const requestReschedule = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+
+    // Get client ID
+    const { data: client } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (!client) {
+      return res.status(404).json(
+        errorResponse('Client profile not found')
+      );
+    }
+
+    // Check if session exists and belongs to client
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .eq('client_id', client.id)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json(
+        errorResponse('Session not found')
+      );
+    }
+
+    // Check if session can be rescheduled (only booked sessions)
+    if (session.status !== 'booked') {
+      return res.status(400).json(
+        errorResponse('Only booked sessions can be rescheduled')
+      );
+    }
+
+    // For now, just change the status to indicate reschedule request
+    // TODO: Add reschedule_request field to database schema
+    const { data: updatedSession, error: updateError } = await supabase
+      .from('sessions')
+      .update({
+        status: 'reschedule_requested',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sessionId)
+      .select('*')
+      .single();
+
+    if (updateError) {
+      console.error('Update session status error:', updateError);
+      return res.status(500).json(
+        errorResponse('Failed to create reschedule request')
+      );
+    }
+
+    res.json(
+      successResponse(updatedSession, 'Reschedule request sent successfully')
+    );
+
+  } catch (error) {
+    console.error('Request reschedule error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while requesting reschedule')
+    );
+  }
+};
+
 // Get available psychologists
 const getAvailablePsychologists = async (req, res) => {
   try {
@@ -466,5 +537,6 @@ module.exports = {
   getSessions,
   bookSession,
   cancelSession,
-  getAvailablePsychologists
+  getAvailablePsychologists,
+  requestReschedule
 };
