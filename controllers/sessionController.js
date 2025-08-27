@@ -5,6 +5,9 @@ const {
   formatDate,
   formatTime
 } = require('../utils/helpers');
+const { createMeetEvent } = require('../utils/meetEventHelper'); // Use OAuth2 approach for real Meet links
+const emailService = require('../utils/emailService');
+const availabilityService = require('../utils/availabilityCalendarService');
 
 // Book a new session
 const bookSession = async (req, res) => {
@@ -45,41 +48,107 @@ const bookSession = async (req, res) => {
 
     const clientId = client.id;
 
-    // Check if the time slot is still available
-    const { data: existingSession, error: checkError } = await supabase
-      .from('sessions')
-      .select('id')
-      .eq('psychologist_id', psychologist_id)
-      .eq('scheduled_date', scheduled_date)
-      .eq('scheduled_time', scheduled_time)
-      .eq('status', 'booked')
+    // Check if the time slot is available using availability service
+    console.log('🔍 Checking time slot availability...');
+    const isAvailable = await availabilityService.isTimeSlotAvailable(
+      psychologist_id, 
+      scheduled_date, 
+      scheduled_time
+    );
+
+    if (!isAvailable) {
+      return res.status(400).json(
+        errorResponse('This time slot is not available. Please select another time.')
+      );
+    }
+
+    console.log('✅ Time slot is available');
+
+    // Get client and psychologist details for Google Calendar
+    const { data: clientDetails, error: clientDetailsError } = await supabase
+      .from('clients')
+      .select(`
+        first_name, 
+        last_name, 
+        child_name,
+        user:users(email)
+      `)
+      .eq('id', clientId)
       .single();
 
-    if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = no rows returned
-      console.error('Error checking session availability:', checkError);
+    if (clientDetailsError || !clientDetails) {
+      console.error('Error fetching client details:', clientDetailsError);
       return res.status(500).json(
-        errorResponse('Failed to check session availability')
+        errorResponse('Failed to fetch client details')
       );
     }
 
-    if (existingSession) {
-      return res.status(400).json(
-        errorResponse('This time slot is already booked')
+    const { data: psychologistDetails, error: psychologistDetailsError } = await supabase
+      .from('psychologists')
+      .select('first_name, last_name, email')
+      .eq('id', psychologist_id)
+      .single();
+
+    if (psychologistDetailsError || !psychologistDetails) {
+      console.error('Error fetching psychologist details:', psychologistDetailsError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch psychologist details')
       );
     }
 
-    // Create the session
+                // Create Google Calendar event with OAuth2 Meet service
+            let meetData = null;
+            try {
+              console.log('🔄 Creating Google Meet meeting via OAuth2...');
+              
+              // Convert date and time to ISO format for Meet service
+              const startDateTime = new Date(`${scheduled_date}T${scheduled_time}`);
+              const endDateTime = new Date(startDateTime.getTime() + 60 * 60000); // 60 minutes
+              
+              meetData = await createMeetEvent({
+                summary: `Therapy Session - ${clientDetails.child_name || clientDetails.first_name} with ${psychologistDetails.first_name}`,
+                description: `Online therapy session between ${clientDetails.child_name || clientDetails.first_name} and ${psychologistDetails.first_name} ${psychologistDetails.last_name}`,
+                startISO: startDateTime.toISOString(),
+                endISO: endDateTime.toISOString(),
+                attendees: [
+                  { email: clientDetails.user?.email, displayName: clientDetails.child_name || `${clientDetails.first_name} ${clientDetails.last_name}` },
+                  { email: psychologistDetails.email, displayName: `${psychologistDetails.first_name} ${psychologistDetails.last_name}` }
+                ],
+                location: 'Online via Google Meet'
+              });
+              
+              console.log('✅ OAuth2 Google Meet meeting created successfully:', meetData);
+              console.log('✅ Real Meet link generated:', meetData.meetLink);
+              
+            } catch (meetError) {
+              console.error('❌ Error creating OAuth2 meeting:', meetError);
+              console.log('⚠️ Continuing with session creation without meet link...');
+              // Continue with session creation even if meet creation fails
+            }
+
+    // Create the session with Google Calendar data
+    const sessionData = {
+      client_id: clientId,
+      psychologist_id,
+      scheduled_date,
+      scheduled_time,
+      status: 'booked',
+      session_notes: req.body.notes || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // Add meet data if available
+    if (meetData) {
+      sessionData.google_calendar_event_id = meetData.eventId;
+      sessionData.google_meet_link = meetData.meetLink;
+      sessionData.google_meet_join_url = meetData.meetLink;
+      sessionData.google_meet_start_url = meetData.meetLink;
+    }
+
     const { data: session, error: createError } = await supabase
       .from('sessions')
-      .insert({
-        client_id: clientId,
-        psychologist_id,
-        scheduled_date,
-        scheduled_time,
-        status: 'booked',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
+      .insert(sessionData)
       .select()
       .single();
 
@@ -88,6 +157,37 @@ const bookSession = async (req, res) => {
       return res.status(500).json(
         errorResponse('Failed to create session')
       );
+    }
+
+    // Update availability to block this time slot
+    try {
+      await availabilityService.updateAvailabilityOnBooking(
+        psychologist_id, 
+        scheduled_date, 
+        scheduled_time
+      );
+      console.log('✅ Availability updated for booked time slot');
+    } catch (availabilityError) {
+      console.error('Error updating availability:', availabilityError);
+      // Continue even if availability update fails
+    }
+
+    // Send confirmation emails to all parties
+    try {
+      await emailService.sendSessionConfirmation({
+        clientName: clientDetails.child_name || `${clientDetails.first_name} ${clientDetails.last_name}`,
+        psychologistName: `${psychologistDetails.first_name} ${psychologistDetails.last_name}`,
+        clientEmail: clientDetails.user?.email,
+        psychologistEmail: psychologistDetails.email,
+        scheduledDate: scheduled_date,
+        scheduledTime: scheduled_time,
+        googleMeetLink: meetData?.meetLink,
+        sessionId: session.id
+      });
+      console.log('✅ Session confirmation emails sent successfully');
+    } catch (emailError) {
+      console.error('Error sending confirmation emails:', emailError);
+      // Continue even if email sending fails
     }
 
     res.status(201).json(
@@ -493,6 +593,53 @@ const rescheduleSession = async (req, res) => {
       );
     }
 
+    // Update Google Calendar event if it exists
+    if (session.google_calendar_event_id) {
+      try {
+        const { data: clientDetails } = await supabase
+          .from('clients')
+          .select('first_name, last_name, child_name')
+          .eq('id', session.client_id)
+          .single();
+
+        const { data: psychologistDetails } = await supabase
+          .from('psychologists')
+          .select('first_name, last_name')
+          .eq('id', session.psychologist_id)
+          .single();
+
+        if (clientDetails && psychologistDetails) {
+          await googleCalendarService.updateSessionEvent(session.google_calendar_event_id, {
+            clientName: clientDetails.child_name || `${clientDetails.first_name} ${clientDetails.last_name}`,
+            psychologistName: `${psychologistDetails.first_name} ${psychologistDetails.last_name}`,
+            scheduledDate: new_date,
+            scheduledTime: new_time,
+            duration: 60
+          });
+        }
+
+        // Send reschedule notification emails
+        try {
+          await emailService.sendRescheduleNotification({
+            clientName: clientDetails.child_name || `${clientDetails.first_name} ${clientDetails.last_name}`,
+            psychologistName: `${psychologistDetails.first_name} ${psychologistDetails.last_name}`,
+            clientEmail: clientDetails.user?.email,
+            psychologistEmail: psychologistDetails.email,
+            scheduledDate: new_date,
+            scheduledTime: new_time,
+            sessionId: session.id
+          }, session.scheduled_date, session.scheduled_time);
+          console.log('Reschedule notification emails sent successfully');
+        } catch (emailError) {
+          console.error('Error sending reschedule notification emails:', emailError);
+          // Continue even if email sending fails
+        }
+      } catch (googleError) {
+        console.error('Error updating Google Calendar event:', googleError);
+        // Continue with session update even if Google Calendar fails
+      }
+    }
+
     // Update session
     const { data: updatedSession, error } = await supabase
       .from('sessions')
@@ -785,6 +932,16 @@ const deleteSession = async (req, res) => {
       return res.status(400).json(
         errorResponse('Cannot delete completed sessions')
       );
+    }
+
+    // Delete from Google Calendar if event exists
+    if (session.google_calendar_event_id) {
+      try {
+        await googleCalendarService.deleteSessionEvent(session.google_calendar_event_id);
+      } catch (googleError) {
+        console.error('Error deleting Google Calendar event:', googleError);
+        // Continue with session deletion even if Google Calendar fails
+      }
     }
 
     // Delete session

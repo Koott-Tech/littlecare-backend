@@ -111,10 +111,16 @@ const getAllUsers = async (req, res) => {
                   availabilityMap[avail.psychologist_id] = [];
                 }
                 
-                // Return date-based availability directly (no weekday conversion)
+                // Format time_slots to match frontend expectations
+                const formattedTimeSlots = avail.time_slots.map(timeString => ({
+                  time: timeString,
+                  available: true,
+                  displayTime: timeString
+                }));
+                
                 availabilityMap[avail.psychologist_id].push({
                   date: avail.date,
-                  time_slots: avail.time_slots,
+                  time_slots: formattedTimeSlots,
                   is_available: avail.is_available
                 });
               });
@@ -305,35 +311,17 @@ const getAllPsychologists = async (req, res) => {
                 availabilityMap[avail.psychologist_id] = [];
               }
               
-              // Convert date-based availability back to day-based for frontend compatibility
-              const date = new Date(avail.date);
-              const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
-              
-              // Handle different time_slots formats
-              let slots = [];
-              if (avail.time_slots) {
-                if (typeof avail.time_slots === 'string') {
-                  // If it's a string, try to parse it
-                  try {
-                    const parsed = JSON.parse(avail.time_slots);
-                    slots = parsed.slots || parsed || [];
-                  } catch (e) {
-                    slots = [avail.time_slots];
-                  }
-                } else if (avail.time_slots.slots) {
-                  // If it has a slots property
-                  slots = avail.time_slots.slots;
-                } else if (Array.isArray(avail.time_slots)) {
-                  // If it's directly an array
-                  slots = avail.time_slots;
-                } else {
-                  slots = [];
-                }
-              }
+              // Format time_slots to match frontend expectations
+              const formattedTimeSlots = avail.time_slots.map(timeString => ({
+                time: timeString,
+                available: true,
+                displayTime: timeString
+              }));
               
               availabilityMap[avail.psychologist_id].push({
-                day: dayName,
-                slots: slots
+                date: avail.date,
+                time_slots: formattedTimeSlots,
+                is_available: avail.is_available
               });
             });
 

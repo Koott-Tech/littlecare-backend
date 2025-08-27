@@ -10,6 +10,9 @@ const psychologistRoutes = require('./routes/psychologists');
 const sessionRoutes = require('./routes/sessions');
 const adminRoutes = require('./routes/admin');
 const superadminRoutes = require('./routes/superadmin');
+const availabilityRoutes = require('./routes/availability');
+const oauthRoutes = require('./routes/oauth');
+const meetRoutes = require('./routes/meet');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -557,48 +560,7 @@ app.delete('/api/debug/clear-test-data', async (req, res) => {
 });
 
 // Public endpoint to get psychologist availability (no authentication required)
-app.get('/api/public/psychologists/:id/availability', async (req, res) => {
-  try {
-    const supabase = require('./config/supabase');
-    const { id } = req.params;
-
-    // Fetch availability for the specific psychologist
-    const { data: availability, error: availabilityError } = await supabase
-      .from('availability')
-      .select('*')
-      .eq('psychologist_id', id)
-      .order('date', { ascending: true });
-
-    if (availabilityError) {
-      console.error('Error fetching psychologist availability:', availabilityError);
-      throw new Error('Failed to fetch psychologist availability');
-    }
-
-    // Format the availability data for the frontend
-    const formattedAvailability = {};
-    availability.forEach(avail => {
-      const dateStr = avail.date;
-      formattedAvailability[dateStr] = {
-        available: avail.is_available !== false,
-        timeSlots: avail.time_slots || []
-      };
-    });
-
-    res.json({
-      success: true,
-      data: {
-        availability: formattedAvailability
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching psychologist availability:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch psychologist availability',
-      message: error.message
-    });
-  }
-});
+// This is now handled by the availability routes with better Google Calendar integration
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -607,6 +569,9 @@ app.use('/api/psychologists', psychologistRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/superadmin', superadminRoutes);
+app.use('/api/availability', availabilityRoutes);
+app.use('/api', oauthRoutes);
+app.use('/api', meetRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

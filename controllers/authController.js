@@ -66,16 +66,16 @@ const register = async (req, res) => {
 
       user = newUser;
 
-      // Create client profile
+      // Create client profile with minimal data (can be updated later)
       const { data: client, error: clientError } = await supabase
         .from('clients')
         .insert([{
           user_id: user.id,
-          first_name: req.body.first_name,
-          last_name: req.body.last_name,
-          phone_number: req.body.phone_number,
-          child_name: req.body.child_name,
-          child_age: req.body.child_age
+          first_name: req.body.first_name || 'Pending',
+          last_name: req.body.last_name || 'Update',
+          phone_number: req.body.phone_number || '+91',
+          child_name: req.body.child_name || 'Pending',
+          child_age: req.body.child_age || 1
         }])
         .select('*')
         .single();
