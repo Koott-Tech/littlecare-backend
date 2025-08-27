@@ -79,6 +79,12 @@ typings/
 .env
 .env.test
 
+# Google API credentials and tokens
+google-service-account.json
+tokens.json
+*.key
+*.pem
+
 # parcel-bundler cache
 .cache
 .parcel-cache
