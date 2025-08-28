@@ -48,18 +48,27 @@ class EmailService {
       const finalSessionTime = sessionTime || scheduledTime;
       const finalMeetLink = meetLink || googleMeetLink;
       
-      const sessionDateTime = new Date(`${finalSessionDate}T${finalSessionTime}`);
-      const formattedDate = sessionDateTime.toLocaleDateString('en-US', {
+      // Parse date and time in IST (UTC+5:30)
+      const sessionDateTime = new Date(`${finalSessionDate}T${finalSessionTime}+05:30`);
+      const formattedDate = sessionDateTime.toLocaleDateString('en-IN', {
         weekday: 'long',
         year: 'numeric',
         month: 'long',
-        day: 'numeric'
+        day: 'numeric',
+        timeZone: 'Asia/Kolkata'
       });
-      const formattedTime = sessionDateTime.toLocaleTimeString('en-US', {
+      const formattedTime = sessionDateTime.toLocaleTimeString('en-IN', {
         hour: '2-digit',
         minute: '2-digit',
+        timeZone: 'Asia/Kolkata',
         timeZoneName: 'short'
       });
+
+      console.log('📅 Email formatting (IST):');
+      console.log('   - Original time:', `${finalSessionDate}T${finalSessionTime}`);
+      console.log('   - Session DateTime:', sessionDateTime.toISOString());
+      console.log('   - Formatted Date:', formattedDate);
+      console.log('   - Formatted Time:', formattedTime);
 
       // Generate calendar invites
       const { createCalendarInvites, generateGoogleCalendarLink, generateOutlookCalendarLink } = require('./calendarInviteGenerator');

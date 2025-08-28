@@ -497,7 +497,8 @@ const bookSession = async (req, res) => {
             sessionDate: updatedSession.scheduled_date,
             sessionTime: updatedSession.scheduled_time,
             price: updatedSession.price,
-            meetLink: updatedSession.google_meet_link
+            meetLink: updatedSession.google_meet_link,
+            sessionId: updatedSession.id
           });
 
           console.log('📧 Email result:', emailResult);
