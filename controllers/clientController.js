@@ -413,10 +413,11 @@ const bookSession = async (req, res) => {
       };
       
       // Use the original time directly (this will be interpreted as IST by Google Calendar)
-      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}:00`;
+      // session.scheduled_time is already in HH:MM:SS format from database
+      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}`;
       const endTime = session.scheduled_time.split(':');
       const endHour = String(parseInt(endTime[0]) + 1).padStart(2, '0');
-      const endForGoogle = `${session.scheduled_date}T${endHour}:${endTime[1]}:00`;
+      const endForGoogle = `${session.scheduled_date}T${endHour}:${endTime[1]}:${endTime[2]}`;
       
       console.log('📅 Event timing (for Google Calendar):');
       console.log('   - Original time:', startDateTimeString);
