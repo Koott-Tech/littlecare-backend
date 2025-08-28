@@ -66,6 +66,11 @@ async function createEventWithMeet({
       console.log('   - Type:', eventData.conferenceData.createRequest?.conferenceSolutionKey?.type);
     }
     
+    // Check if Meet link is immediately available
+    if (eventData.hangoutLink) {
+      console.log('   🚀 Meet link immediately available:', eventData.hangoutLink);
+    }
+    
     return eventData;
     
   } catch (error) {
@@ -103,40 +108,75 @@ async function waitForConferenceReady(eventId, timeoutMs = 30000, intervalMs = 2
       const status = data.conferenceData?.createRequest?.status?.statusCode;
       console.log(`   📊 Conference Status: ${status || 'pending'}`);
       
-      if (status === 'success') {
-        console.log('   🎉 Conference is ready!');
-        
-        // Try multiple sources for Meet link
-        let meetLink = null;
-        
-        // First try: conferenceData entryPoints
-        if (data.conferenceData?.entryPoints) {
-          const meetEntry = data.conferenceData.entryPoints.find(ep => 
-            ep.entryPointType === 'video' || 
-            ep.uri?.includes('meet.google.com') || 
-            ep.uri?.includes('hangouts.google.com')
-          );
-          if (meetEntry) {
-            meetLink = meetEntry.uri;
-            console.log('   🔗 Meet link from entryPoints:', meetLink);
+              if (status === 'success') {
+          console.log('   🎉 Conference is ready!');
+          
+          // Try multiple sources for Meet link
+          let meetLink = null;
+          
+          // First try: conferenceData entryPoints
+          if (data.conferenceData?.entryPoints) {
+            const meetEntry = data.conferenceData.entryPoints.find(ep => 
+              ep.entryPointType === 'video' || 
+              ep.uri?.includes('meet.google.com') ||
+              ep.uri?.includes('hangouts.google.com')
+            );
+            if (meetEntry) {
+              meetLink = meetEntry.uri;
+              console.log('   🔗 Meet link from entryPoints:', meetLink);
+            }
+          }
+          
+          // Second try: hangoutLink (fallback)
+          if (!meetLink && data.hangoutLink) {
+            meetLink = data.hangoutLink;
+            console.log('   🔗 Meet link from hangoutLink:', meetLink);
+          }
+          
+          if (meetLink) {
+            return {
+              event: data,
+              meetLink,
+              eventId: data.id,
+              calendarLink: `https://calendar.google.com/event?eid=${data.id}`
+            };
           }
         }
         
-        // Second try: hangoutLink (fallback)
-        if (!meetLink && data.hangoutLink) {
-          meetLink = data.hangoutLink;
-          console.log('   🔗 Meet link from hangoutLink:', meetLink);
+        // Fallback: If conference is still pending but we have the event, try to extract any available link
+        if (attempts >= 10) { // After 20 seconds, try fallback
+          console.log('   ⏰ Conference still pending after 20s, trying fallback extraction...');
+          
+          let meetLink = null;
+          
+          // Try hangoutLink even if conference is pending
+          if (data.hangoutLink) {
+            meetLink = data.hangoutLink;
+            console.log('   🔗 Fallback Meet link from hangoutLink:', meetLink);
+          }
+          
+          // Try conferenceData even if pending
+          if (!meetLink && data.conferenceData?.entryPoints) {
+            const meetEntry = data.conferenceData.entryPoints.find(ep => 
+              ep.uri?.includes('meet.google.com') || ep.uri?.includes('hangouts.google.com')
+            );
+            if (meetEntry) {
+              meetLink = meetEntry.uri;
+              console.log('   🔗 Fallback Meet link from conferenceData:', meetLink);
+            }
+          }
+          
+          if (meetLink) {
+            console.log('   ✅ Using fallback Meet link (conference still pending)');
+            return {
+              event: data,
+              meetLink,
+              eventId: data.id,
+              calendarLink: `https://calendar.google.com/event?eid=${data.id}`,
+              note: 'Conference was pending but link extracted'
+            };
+          }
         }
-        
-        if (meetLink) {
-          return { 
-            event: data, 
-            meetLink,
-            eventId: data.id,
-            calendarLink: `https://calendar.google.com/event?eid=${data.id}`
-          };
-        }
-      }
       
       if (status === 'failure') {
         throw new Error('Conference creation failed');
