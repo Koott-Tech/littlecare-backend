@@ -37,9 +37,13 @@ const formatDate = (date) => {
 // Format time for database
 const formatTime = (time) => {
   if (typeof time === 'string') {
+    // If it's already a string, ensure it has seconds format (HH:MM:SS)
+    if (time.length === 5) {
+      return time + ':00'; // Add seconds if missing
+    }
     return time;
   }
-  return time.toTimeString().slice(0, 5);
+  return time.toTimeString().slice(0, 8); // Include seconds (HH:MM:SS)
 };
 
 // Check if date is in the future
