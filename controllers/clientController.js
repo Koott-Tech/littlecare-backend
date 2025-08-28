@@ -324,23 +324,36 @@ const bookSession = async (req, res) => {
     console.log('✅ Availability check passed');
 
     // Check if time slot is already booked
-    const { data: existingSession } = await supabase
+    console.log('🔍 Step 4: Checking for existing sessions');
+    console.log('   - Psychologist ID:', psychologist_id);
+    console.log('   - Date (raw):', scheduled_date);
+    console.log('   - Date (formatted):', formatDate(scheduled_date));
+    console.log('   - Time (raw):', scheduled_time);
+    console.log('   - Time (formatted):', formatTime(scheduled_time));
+
+    const { data: existingSession, error: existingSessionError } = await supabase
       .from('sessions')
-      .select('id')
+      .select('id, scheduled_date, scheduled_time, status, client_id')
       .eq('psychologist_id', psychologist_id)
-      .eq('scheduled_date', scheduled_date)
-      .eq('scheduled_time', scheduled_time)
+      .eq('scheduled_date', formatDate(scheduled_date))
+      .eq('scheduled_time', formatTime(scheduled_time))
       .in('status', ['booked', 'rescheduled'])
       .single();
 
+    console.log('📊 Existing session query result:', existingSession);
+    console.log('📊 Existing session query error:', existingSessionError);
+
     if (existingSession) {
+      console.log('❌ Time slot already booked by session:', existingSession);
       return res.status(400).json(
         errorResponse('This time slot is already booked')
       );
     }
 
+    console.log('✅ No existing sessions found - time slot is free');
+
     // Create session
-    console.log('🔍 Step 4: Creating session');
+    console.log('🔍 Step 5: Creating session');
     const sessionData = {
       client_id: client.id,
       psychologist_id,
@@ -375,9 +388,9 @@ const bookSession = async (req, res) => {
 
     console.log('✅ Session created successfully, now creating Google Meet link...');
 
-    // Step 5: Create Google Meet link
-    try {
-      console.log('🔍 Step 5: Creating Google Meet link');
+          // Step 6: Create Google Meet link
+      try {
+        console.log('🔍 Step 6: Creating Google Meet link');
       const { createMeetEvent } = require('../utils/meetEventHelper');
 
       // Format event data properly for meetEventHelper
@@ -424,9 +437,9 @@ const bookSession = async (req, res) => {
       } else {
         console.log('✅ Session updated with Google Meet details');
         
-        // Step 6: Send email notifications
+        // Step 7: Send email notifications
         try {
-          console.log('🔍 Step 6: Sending email notifications');
+          console.log('🔍 Step 7: Sending email notifications');
           const { sendSessionConfirmationEmail } = require('../utils/emailService');
           
           const emailResult = await sendSessionConfirmationEmail({
