@@ -393,9 +393,14 @@ const bookSession = async (req, res) => {
         console.log('🔍 Step 6: Creating Google Meet link');
       const { createMeetEvent } = require('../utils/meetEventHelper');
 
-      // Format event data properly for meetEventHelper
-      const startDateTime = new Date(`${session.scheduled_date}T${session.scheduled_time}`);
+      // Format event data properly for meetEventHelper with IST timezone
+      const startDateTime = new Date(`${session.scheduled_date}T${session.scheduled_time}+05:30`);
       const endDateTime = new Date(startDateTime.getTime() + 60 * 60000); // 60 minutes later
+      
+      console.log('📅 Event timing (IST):');
+      console.log('   - Start (IST):', startDateTime.toISOString());
+      console.log('   - End (IST):', endDateTime.toISOString());
+      console.log('   - Local time:', startDateTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
       
       const meetEventResult = await createMeetEvent({
         summary: `Therapy Session - Client with Psychologist`,

@@ -24,34 +24,45 @@ function generateCalendarInvite(sessionData) {
     duration = 60 // Default 60 minutes
   } = sessionData;
 
-  // Parse date and time
-  const sessionDateTime = new Date(`${sessionDate}T${sessionTime}`);
+  // Parse date and time in IST (UTC+5:30)
+  const sessionDateTime = new Date(`${sessionDate}T${sessionTime}+05:30`);
   const endDateTime = new Date(sessionDateTime.getTime() + (duration * 60000));
 
-  // Format dates for iCalendar (YYYYMMDDTHHMMSSZ)
-  const formatICalDate = (date) => {
-    return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  // Format dates for iCalendar in IST timezone (YYYYMMDDTHHMMSS)
+  const formatICalDateIST = (date) => {
+    // Convert to IST and format without Z (no UTC indicator)
+    const istDate = new Date(date.getTime());
+    return istDate.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z/, '');
   };
 
-  const startDate = formatICalDate(sessionDateTime);
-  const endDate = formatICalDate(endDateTime);
-  const createdDate = formatICalDate(new Date());
+  const startDate = formatICalDateIST(sessionDateTime);
+  const endDate = formatICalDateIST(endDateTime);
+  const createdDate = formatICalDateIST(new Date());
 
   // Generate unique UID
   const uid = `session-${sessionId}-${crypto.randomUUID()}@kuttikal.com`;
 
-  // Calendar invite content
+  // Calendar invite content with IST timezone
   const icalContent = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
     'PRODID:-//Kuttikal//Therapy Sessions//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:REQUEST',
+    'BEGIN:VTIMEZONE',
+    'TZID:Asia/Kolkata',
+    'BEGIN:STANDARD',
+    'DTSTART:19700101T000000',
+    'TZOFFSETFROM:+0530',
+    'TZOFFSETTO:+0530',
+    'TZNAME:IST',
+    'END:STANDARD',
+    'END:VTIMEZONE',
     'BEGIN:VEVENT',
     `UID:${uid}`,
     `DTSTAMP:${createdDate}`,
-    `DTSTART:${startDate}`,
-    `DTEND:${endDate}`,
+    `DTSTART;TZID=Asia/Kolkata:${startDate}`,
+    `DTEND;TZID=Asia/Kolkata:${endDate}`,
     `SUMMARY:Therapy Session - ${clientName} with ${psychologistName}`,
     `DESCRIPTION:Online therapy session scheduled through Kuttikal.\\n\\n` +
     `Client: ${clientName}\\n` +
@@ -128,16 +139,17 @@ function generateGoogleCalendarLink(sessionData) {
     duration = 60
   } = sessionData;
 
-  const sessionDateTime = new Date(`${sessionDate}T${sessionTime}`);
+  // Parse date and time in IST (UTC+5:30)
+  const sessionDateTime = new Date(`${sessionDate}T${sessionTime}+05:30`);
   const endDateTime = new Date(sessionDateTime.getTime() + (duration * 60000));
 
-  // Format for Google Calendar (YYYYMMDDTHHMMSSZ)
-  const formatGoogleDate = (date) => {
-    return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  // Format for Google Calendar in IST (YYYYMMDDTHHMMSS without Z for local time)
+  const formatGoogleDateIST = (date) => {
+    return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z/, '');
   };
 
-  const startDate = formatGoogleDate(sessionDateTime);
-  const endDate = formatGoogleDate(endDateTime);
+  const startDate = formatGoogleDateIST(sessionDateTime);
+  const endDate = formatGoogleDateIST(endDateTime);
 
   const title = encodeURIComponent(`Therapy Session - ${clientName} with ${psychologistName}`);
   const details = encodeURIComponent(
@@ -163,7 +175,8 @@ function generateOutlookCalendarLink(sessionData) {
     duration = 60
   } = sessionData;
 
-  const sessionDateTime = new Date(`${sessionDate}T${sessionTime}`);
+  // Parse date and time in IST (UTC+5:30)
+  const sessionDateTime = new Date(`${sessionDate}T${sessionTime}+05:30`);
   const endDateTime = new Date(sessionDateTime.getTime() + (duration * 60000));
 
   const title = encodeURIComponent(`Therapy Session - ${clientName} with ${psychologistName}`);
@@ -172,6 +185,7 @@ function generateOutlookCalendarLink(sessionData) {
   );
   const location = encodeURIComponent(meetLink);
 
+  // Use IST time for Outlook
   const startDate = sessionDateTime.toISOString();
   const endDate = endDateTime.toISOString();
 
