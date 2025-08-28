@@ -35,6 +35,31 @@ function getOAuth2Client() {
 }
 
 function calendar() {
+  // Try to use service account first (for production)
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY_BASE64) {
+    console.log('🔑 Using Google service account authentication');
+    try {
+      const keyJson = Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_BASE64, 'base64').toString('utf-8');
+      const serviceAccountKey = JSON.parse(keyJson);
+      
+      const auth = new google.auth.JWT({
+        email: serviceAccountKey.client_email,
+        key: serviceAccountKey.private_key,
+        scopes: [
+          'https://www.googleapis.com/auth/calendar',
+          'https://www.googleapis.com/auth/calendar.events'
+        ]
+      });
+
+      return google.calendar({ version: 'v3', auth });
+    } catch (error) {
+      console.error('❌ Error with service account, falling back to OAuth2:', error.message);
+      return google.calendar({ version: 'v3', auth: getOAuth2Client() });
+    }
+  }
+  
+  // Fallback to OAuth2 (for local development)
+  console.log('🔑 Using OAuth2 authentication');
   return google.calendar({ version: 'v3', auth: getOAuth2Client() });
 }
 
