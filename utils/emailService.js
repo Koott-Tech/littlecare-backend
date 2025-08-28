@@ -226,7 +226,7 @@ class EmailService {
           <div style="background: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #dee2e6;">
             <p style="color: #6c757d; font-size: 14px;">
               This email confirms your scheduled therapy session. 
-              Please ensure you're prepared and on time.
+              Please ensure you're prepared and than on time.
             </p>
           </div>
         </div>
