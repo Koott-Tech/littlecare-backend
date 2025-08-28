@@ -440,9 +440,9 @@ const bookSession = async (req, res) => {
         // Step 7: Send email notifications
         try {
           console.log('🔍 Step 7: Sending email notifications');
-          const { sendSessionConfirmationEmail } = require('../utils/emailService');
+          const emailService = require('../utils/emailService');
           
-          const emailResult = await sendSessionConfirmationEmail({
+          const emailResult = await emailService.sendSessionConfirmation({
             clientEmail: 'client@placeholder.com',
             psychologistEmail: 'psychologist@placeholder.com',
             clientName: 'Client',
