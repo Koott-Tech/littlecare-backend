@@ -269,7 +269,13 @@ const bookSession = async (req, res) => {
     }
 
     // Check if time slot is available
-    const { data: availability } = await supabase
+    console.log('🔍 Step 3: Availability validation');
+    console.log('📅 Checking availability for:');
+    console.log('   - Psychologist ID:', psychologist_id);
+    console.log('   - Date:', scheduled_date);
+    console.log('   - Time:', scheduled_time);
+    
+    const { data: availability, error: availabilityError } = await supabase
       .from('availability')
       .select('time_slots')
       .eq('psychologist_id', psychologist_id)
@@ -277,11 +283,28 @@ const bookSession = async (req, res) => {
       .eq('is_available', true)
       .single();
 
+    console.log('📊 Availability query result:', availability);
+    console.log('📊 Availability query error:', availabilityError);
+    
+    if (availability && availability.time_slots) {
+      console.log('📋 Available time slots:', availability.time_slots);
+      console.log('🔍 Looking for time slot:', scheduled_time);
+      console.log('📋 Time slot type:', typeof scheduled_time);
+      console.log('📋 Available slots types:', availability.time_slots.map(slot => typeof slot));
+      console.log('✅ Includes check result:', availability.time_slots.includes(scheduled_time));
+    }
+
     if (!availability || !availability.time_slots.includes(scheduled_time)) {
+      console.log('❌ Availability check failed');
+      console.log('   - Availability exists:', !!availability);
+      console.log('   - Time slots:', availability?.time_slots);
+      console.log('   - Requested time:', scheduled_time);
       return res.status(400).json(
         errorResponse('Selected time slot is not available')
       );
     }
+    
+    console.log('✅ Availability check passed');
 
     // Check if time slot is already booked
     const { data: existingSession } = await supabase
