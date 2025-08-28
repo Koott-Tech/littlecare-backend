@@ -373,12 +373,87 @@ const bookSession = async (req, res) => {
       );
     }
 
-    console.log('✅ Session booking completed successfully');
-    console.log('🚀 ===== SESSION BOOKING DEBUG END =====');
-    
-    res.status(201).json(
-      successResponse(session, 'Session booked successfully')
-    );
+    console.log('✅ Session created successfully, now creating Google Meet link...');
+
+    // Step 5: Create Google Meet link
+    try {
+      console.log('🔍 Step 5: Creating Google Meet link');
+      const { createMeetEvent } = require('../utils/meetEventHelper');
+
+      const meetEventResult = await createMeetEvent({
+        title: `Therapy Session - Client with Psychologist`,
+        date: session.scheduled_date,
+        time: session.scheduled_time,
+        clientEmail: 'client@placeholder.com', // Placeholder for now
+        psychologistEmail: 'psychologist@placeholder.com', // Placeholder for now
+        duration: 60
+      });
+
+      console.log('📊 Meet event result:', meetEventResult);
+
+      // Update session with Google Meet details
+      const meetUpdateData = {
+        google_meet_link: meetEventResult.meetLink,
+        google_meet_join_url: meetEventResult.joinUrl || meetEventResult.meetLink,
+        google_meet_start_url: meetEventResult.startUrl || meetEventResult.meetLink,
+        google_calendar_event_id: meetEventResult.eventId
+      };
+
+      console.log('💾 Updating session with Meet data:', meetUpdateData);
+
+      const { data: updatedSession, error: updateError } = await supabase
+        .from('sessions')
+        .update(meetUpdateData)
+        .eq('id', session.id)
+        .select('*')
+        .single();
+
+      if (updateError) {
+        console.error('❌ Error updating session with Meet details:', updateError);
+        console.log('✅ Session booked successfully (Meet link creation failed)');
+        return res.status(201).json(
+          successResponse(session, 'Session booked successfully (Meet link creation failed)')
+        );
+      } else {
+        console.log('✅ Session updated with Google Meet details');
+        
+        // Step 6: Send email notifications
+        try {
+          console.log('🔍 Step 6: Sending email notifications');
+          const { sendSessionConfirmationEmail } = require('../utils/emailService');
+          
+          const emailResult = await sendSessionConfirmationEmail({
+            clientEmail: 'client@placeholder.com',
+            psychologistEmail: 'psychologist@placeholder.com',
+            clientName: 'Client',
+            psychologistName: 'Psychologist',
+            sessionDate: updatedSession.scheduled_date,
+            sessionTime: updatedSession.scheduled_time,
+            price: updatedSession.price,
+            meetLink: updatedSession.google_meet_link
+          });
+
+          console.log('📧 Email result:', emailResult);
+          console.log('✅ Session booking completed successfully with Meet link and email notifications');
+        } catch (emailError) {
+          console.error('❌ Error sending email notifications:', emailError);
+          console.log('✅ Session booked successfully with Meet link (email failed)');
+        }
+
+        console.log('🚀 ===== SESSION BOOKING DEBUG END =====');
+        return res.status(201).json(
+          successResponse(updatedSession, 'Session booked successfully with Google Meet link')
+        );
+      }
+
+    } catch (error) {
+      console.error('❌ Error creating Meet link:', error);
+      console.log('✅ Session booked successfully (Meet link creation failed)');
+      console.log('🚀 ===== SESSION BOOKING DEBUG END =====');
+      return res.status(201).json(
+        successResponse(session, 'Session booked successfully (Meet link creation failed)')
+      );
+    }
 
   } catch (error) {
     console.error('❌ BOOKING ERROR:', error);
