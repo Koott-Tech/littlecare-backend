@@ -179,14 +179,31 @@ const getSessions = async (req, res) => {
 const bookSession = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { psychologist_id, package_id, scheduled_date, scheduled_time } = req.body;
+    const { psychologist_id, package_id, scheduled_date, scheduled_time, price } = req.body;
+
+    console.log('🚀 ===== SESSION BOOKING DEBUG START =====');
+    console.log('📅 Session Booking Request:', {
+      psychologist_id,
+      package_id,
+      scheduled_date,
+      scheduled_time,
+      price,
+      userId,
+      environment: process.env.NODE_ENV || 'development',
+      timestamp: new Date().toISOString()
+    });
+    console.log('🔍 Request Headers:', req.headers);
+    console.log('🔍 Full Request Body:', req.body);
 
     // Get client ID
+    console.log('🔍 Step 1: Getting client ID for user:', userId);
     const { data: client } = await supabase
       .from('clients')
       .select('id')
       .eq('user_id', userId)
       .single();
+
+    console.log('👤 Client lookup result:', client);
 
     if (!client) {
       return res.status(404).json(
@@ -207,18 +224,37 @@ const bookSession = async (req, res) => {
       );
     }
 
-    // Check if package exists and belongs to psychologist
-    const { data: package } = await supabase
-      .from('packages')
-      .select('*')
-      .eq('id', package_id)
-      .eq('psychologist_id', psychologist_id)
-      .single();
+    console.log('🔍 Step 2: Package validation');
+    console.log('📦 Package ID provided:', package_id);
+    console.log('📦 Package ID type:', typeof package_id);
+    console.log('📦 Package ID truthiness:', !!package_id);
+    
+    let package = null;
+    
+    // Only validate package if package_id is provided and not null/undefined
+    if (package_id && package_id !== 'null' && package_id !== 'undefined') {
+      console.log('📦 Validating package...');
+      const { data: packageData, error: packageError } = await supabase
+        .from('packages')
+        .select('*')
+        .eq('id', package_id)
+        .eq('psychologist_id', psychologist_id)
+        .single();
 
-    if (!package) {
-      return res.status(404).json(
-        errorResponse('Package not found or does not belong to this psychologist')
-      );
+      console.log('📦 Package lookup result:', packageData);
+      console.log('📦 Package lookup error:', packageError);
+
+      if (!packageData) {
+        console.log('❌ Package validation failed');
+        return res.status(400).json(
+          errorResponse('Package not found or does not belong to this psychologist')
+        );
+      }
+      
+      package = packageData;
+      console.log('✅ Package validation passed');
+    } else {
+      console.log('📦 No package validation needed (package_id not provided)');
     }
 
     // Check if date is in the future
@@ -264,33 +300,31 @@ const bookSession = async (req, res) => {
     }
 
     // Create session
+    console.log('🔍 Step 4: Creating session');
+    const sessionData = {
+      client_id: client.id,
+      psychologist_id,
+      scheduled_date: formatDate(scheduled_date),
+      scheduled_time: formatTime(scheduled_time),
+      status: 'booked',
+      price: price || (package?.price || 0)
+    };
+    
+    // Only add package_id if it's provided and valid
+    if (package_id && package_id !== 'null' && package_id !== 'undefined') {
+      sessionData.package_id = package_id;
+    }
+    
+    console.log('💾 Session data to insert:', sessionData);
+    
     const { data: session, error: sessionError } = await supabase
       .from('sessions')
-      .insert([{
-        client_id: client.id,
-        psychologist_id,
-        package_id,
-        scheduled_date: formatDate(scheduled_date),
-        scheduled_time: formatTime(scheduled_time),
-        price: package.price,
-        status: 'booked'
-      }])
-      .select(`
-        *,
-        psychologist:psychologists(
-          id,
-          first_name,
-          last_name,
-          area_of_expertise
-        ),
-        package:packages(
-          id,
-          package_type,
-          price,
-          description
-        )
-      `)
+      .insert([sessionData])
+      .select('*')
       .single();
+
+    console.log('💾 Session creation result:', session);
+    console.log('💾 Session creation error:', sessionError);
 
     if (sessionError) {
       console.error('Session booking error:', sessionError);
@@ -299,12 +333,19 @@ const bookSession = async (req, res) => {
       );
     }
 
+    console.log('✅ Session booking completed successfully');
+    console.log('🚀 ===== SESSION BOOKING DEBUG END =====');
+    
     res.status(201).json(
       successResponse(session, 'Session booked successfully')
     );
 
   } catch (error) {
-    console.error('Book session error:', error);
+    console.error('❌ BOOKING ERROR:', error);
+    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Error message:', error.message);
+    console.log('🚀 ===== SESSION BOOKING DEBUG END (ERROR) =====');
+    
     res.status(500).json(
       errorResponse('Internal server error while booking session')
     );
