@@ -393,20 +393,42 @@ const bookSession = async (req, res) => {
         console.log('🔍 Step 6: Creating Google Meet link');
       const { createMeetEvent } = require('../utils/meetEventHelper');
 
-      // Format event data properly for meetEventHelper with IST timezone
-      const startDateTime = new Date(`${session.scheduled_date}T${session.scheduled_time}+05:30`);
+      // Format event data properly for Google Calendar API in IST
+      // Create datetime strings in the format Google Calendar expects for IST timezone
+      const startDateTimeString = `${session.scheduled_date}T${session.scheduled_time}`;
+      const startDateTime = new Date(`${startDateTimeString}+05:30`); // Parse as IST
       const endDateTime = new Date(startDateTime.getTime() + 60 * 60000); // 60 minutes later
       
-      console.log('📅 Event timing (IST):');
-      console.log('   - Start (IST):', startDateTime.toISOString());
-      console.log('   - End (IST):', endDateTime.toISOString());
-      console.log('   - Local time:', startDateTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
+      // Format for Google Calendar API (without timezone indicator, let Google handle timezone)
+      const formatForGoogleCalendar = (date) => {
+        // Get IST time components
+        const istDate = new Date(date.getTime());
+        const year = istDate.getUTCFullYear();
+        const month = String(istDate.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(istDate.getUTCDate()).padStart(2, '0');
+        const hours = String(istDate.getUTCHours()).padStart(2, '0');
+        const minutes = String(istDate.getUTCMinutes()).padStart(2, '0');
+        const seconds = String(istDate.getUTCSeconds()).padStart(2, '0');
+        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+      };
+      
+      // Use the original time directly (this will be interpreted as IST by Google Calendar)
+      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}:00`;
+      const endTime = session.scheduled_time.split(':');
+      const endHour = String(parseInt(endTime[0]) + 1).padStart(2, '0');
+      const endForGoogle = `${session.scheduled_date}T${endHour}:${endTime[1]}:00`;
+      
+      console.log('📅 Event timing (for Google Calendar):');
+      console.log('   - Original time:', startDateTimeString);
+      console.log('   - Start for Google:', startForGoogle);
+      console.log('   - End for Google:', endForGoogle);
+      console.log('   - Will be created in Asia/Kolkata timezone');
       
       const meetEventResult = await createMeetEvent({
         summary: `Therapy Session - Client with Psychologist`,
         description: `Scheduled therapy session.\n\nJoin the meeting via Google Meet.`,
-        startISO: startDateTime.toISOString(),
-        endISO: endDateTime.toISOString(),
+        startISO: startForGoogle,
+        endISO: endForGoogle,
         attendees: [
           { email: 'client@placeholder.com' },
           { email: 'psychologist@placeholder.com' }
