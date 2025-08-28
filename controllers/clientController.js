@@ -275,6 +275,20 @@ const bookSession = async (req, res) => {
     console.log('   - Date:', scheduled_date);
     console.log('   - Time:', scheduled_time);
     
+    // Convert 24-hour time to 12-hour format for availability check
+    const convertTo12Hour = (time24) => {
+      const [hours, minutes] = time24.split(':');
+      const hour = parseInt(hours, 10);
+      const ampm = hour >= 12 ? 'PM' : 'AM';
+      const hour12 = hour % 12 || 12;
+      return `${hour12}:${minutes} ${ampm}`;
+    };
+    
+    const scheduled_time_12h = convertTo12Hour(scheduled_time);
+    console.log('🕐 Time format conversion:');
+    console.log('   - 24-hour format:', scheduled_time);
+    console.log('   - 12-hour format:', scheduled_time_12h);
+    
     const { data: availability, error: availabilityError } = await supabase
       .from('availability')
       .select('time_slots')
@@ -288,17 +302,20 @@ const bookSession = async (req, res) => {
     
     if (availability && availability.time_slots) {
       console.log('📋 Available time slots:', availability.time_slots);
-      console.log('🔍 Looking for time slot:', scheduled_time);
+      console.log('🔍 Looking for time slot (24h):', scheduled_time);
+      console.log('🔍 Looking for time slot (12h):', scheduled_time_12h);
       console.log('📋 Time slot type:', typeof scheduled_time);
       console.log('📋 Available slots types:', availability.time_slots.map(slot => typeof slot));
-      console.log('✅ Includes check result:', availability.time_slots.includes(scheduled_time));
+      console.log('✅ Includes check result (12h):', availability.time_slots.includes(scheduled_time_12h));
     }
 
-    if (!availability || !availability.time_slots.includes(scheduled_time)) {
+    // Check availability using 12-hour format
+    if (!availability || !availability.time_slots.includes(scheduled_time_12h)) {
       console.log('❌ Availability check failed');
       console.log('   - Availability exists:', !!availability);
       console.log('   - Time slots:', availability?.time_slots);
-      console.log('   - Requested time:', scheduled_time);
+      console.log('   - Requested time (24h):', scheduled_time);
+      console.log('   - Requested time (12h):', scheduled_time_12h);
       return res.status(400).json(
         errorResponse('Selected time slot is not available')
       );
