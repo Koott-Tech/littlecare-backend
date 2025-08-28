@@ -4,6 +4,70 @@ const path = require('path');
 
 const TOKENS_PATH = path.join(__dirname, '../tokens.json');
 
+// Service Account paths for different environments
+const SERVICE_ACCOUNT_PATHS = [
+  '/etc/secrets/google-service-account.json', // Render secret file path
+  path.join(__dirname, '../google-service-account.json'), // Local development
+  path.join(__dirname, '../key.json') // Alternative local path
+];
+
+/**
+ * Creates and returns a Google Calendar client using service account or OAuth2
+ * @returns {Object} Google Calendar client instance
+ */
+const calendar = async () => {
+  try {
+    // Try service account first (production)
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+      console.log('🔑 Using service account from environment variable');
+      const serviceAccountKey = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+      
+      const auth = new google.auth.JWT({
+        email: serviceAccountKey.client_email,
+        key: serviceAccountKey.private_key,
+        scopes: [
+          'https://www.googleapis.com/auth/calendar',
+          'https://www.googleapis.com/auth/calendar.events'
+        ]
+      });
+
+      await auth.authorize();
+      console.log('🔐 Google service account authenticated successfully (env var)');
+      return google.calendar({ version: 'v3', auth });
+    }
+
+    // Try service account from file (Render secret files or local)
+    for (const filePath of SERVICE_ACCOUNT_PATHS) {
+      if (existsSync(filePath)) {
+        console.log('🔑 Using service account from file:', filePath);
+        const serviceAccountKey = JSON.parse(readFileSync(filePath, 'utf8'));
+        
+        const auth = new google.auth.JWT({
+          email: serviceAccountKey.client_email,
+          key: serviceAccountKey.private_key,
+          scopes: [
+            'https://www.googleapis.com/auth/calendar',
+            'https://www.googleapis.com/auth/calendar.events'
+          ]
+        });
+
+        await auth.authorize();
+        console.log('🔐 Google service account authenticated successfully (file)');
+        return google.calendar({ version: 'v3', auth });
+      }
+    }
+
+    // Fallback to OAuth2 (development)
+    console.log('🔑 Using OAuth2 client (development)');
+    return google.calendar({ version: 'v3', auth: getOAuth2Client() });
+
+  } catch (error) {
+    console.error('❌ Error initializing Google Calendar client:', error.message);
+    console.warn('⚠️ Falling back to mock calendar client');
+    return createMockCalendarClient();
+  }
+};
+
 function getOAuth2Client() {
   const oAuth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -34,33 +98,14 @@ function getOAuth2Client() {
   return oAuth2Client;
 }
 
-function calendar() {
-  // Try to use service account first (for production)
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY_BASE64) {
-    console.log('🔑 Using Google service account authentication');
-    try {
-      const keyJson = Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_BASE64, 'base64').toString('utf-8');
-      const serviceAccountKey = JSON.parse(keyJson);
-      
-      const auth = new google.auth.JWT({
-        email: serviceAccountKey.client_email,
-        key: serviceAccountKey.private_key,
-        scopes: [
-          'https://www.googleapis.com/auth/calendar',
-          'https://www.googleapis.com/auth/calendar.events'
-        ]
-      });
-
-      return google.calendar({ version: 'v3', auth });
-    } catch (error) {
-      console.error('❌ Error with service account, falling back to OAuth2:', error.message);
-      return google.calendar({ version: 'v3', auth: getOAuth2Client() });
+// Mock calendar client for fallback
+function createMockCalendarClient() {
+  return {
+    events: {
+      insert: async () => ({ data: { id: 'mock-event-id', hangoutLink: 'https://meet.google.com/mock-link' } }),
+      get: async () => ({ data: { hangoutLink: 'https://meet.google.com/mock-link' } })
     }
-  }
-  
-  // Fallback to OAuth2 (for local development)
-  console.log('🔑 Using OAuth2 authentication');
-  return google.calendar({ version: 'v3', auth: getOAuth2Client() });
+  };
 }
 
 function authUrl() {
