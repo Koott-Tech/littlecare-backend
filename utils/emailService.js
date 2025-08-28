@@ -36,10 +36,19 @@ class EmailService {
         scheduledDate,
         scheduledTime,
         googleMeetLink,
-        sessionId
+        sessionId,
+        sessionDate,
+        sessionTime,
+        meetLink,
+        price
       } = sessionData;
 
-      const sessionDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
+      // Use consistent date/time format
+      const finalSessionDate = sessionDate || scheduledDate;
+      const finalSessionTime = sessionTime || scheduledTime;
+      const finalMeetLink = meetLink || googleMeetLink;
+      
+      const sessionDateTime = new Date(`${finalSessionDate}T${finalSessionTime}`);
       const formattedDate = sessionDateTime.toLocaleDateString('en-US', {
         weekday: 'long',
         year: 'numeric',
@@ -52,30 +61,63 @@ class EmailService {
         timeZoneName: 'short'
       });
 
+      // Generate calendar invites
+      const { createCalendarInvites, generateGoogleCalendarLink, generateOutlookCalendarLink } = require('./calendarInviteGenerator');
+      
+      const calendarData = {
+        sessionId: sessionId || 'unknown',
+        clientName,
+        psychologistName,
+        sessionDate: finalSessionDate,
+        sessionTime: finalSessionTime,
+        meetLink: finalMeetLink,
+        clientEmail,
+        psychologistEmail,
+        price: price || 0
+      };
+
+      const calendarInvites = createCalendarInvites(calendarData);
+      const googleCalendarLink = generateGoogleCalendarLink(calendarData);
+      const outlookCalendarLink = generateOutlookCalendarLink(calendarData);
+
       // Send email to client
-      if (clientEmail) {
+      if (clientEmail && !clientEmail.includes('placeholder')) {
+        console.log('📧 Sending email to client:', clientEmail);
         await this.sendClientConfirmation({
           to: clientEmail,
           clientName,
           psychologistName,
           scheduledDate: formattedDate,
           scheduledTime: formattedTime,
-          googleMeetLink,
-          sessionId
+          googleMeetLink: finalMeetLink,
+          sessionId,
+          calendarInvite: calendarInvites.client,
+          googleCalendarLink,
+          outlookCalendarLink,
+          price
         });
+      } else {
+        console.log('⚠️ Skipping client email (placeholder or missing):', clientEmail);
       }
 
       // Send email to psychologist
-      if (psychologistEmail) {
+      if (psychologistEmail && !psychologistEmail.includes('placeholder')) {
+        console.log('📧 Sending email to psychologist:', psychologistEmail);
         await this.sendPsychologistConfirmation({
           to: psychologistEmail,
           clientName,
           psychologistName,
           scheduledDate: formattedDate,
           scheduledTime: formattedTime,
-          googleMeetLink,
-          sessionId
+          googleMeetLink: finalMeetLink,
+          sessionId,
+          calendarInvite: calendarInvites.psychologist,
+          googleCalendarLink,
+          outlookCalendarLink,
+          price
         });
+      } else {
+        console.log('⚠️ Skipping psychologist email (placeholder or missing):', psychologistEmail);
       }
 
       // Send email to company admin
@@ -99,7 +141,19 @@ class EmailService {
   }
 
   async sendClientConfirmation(emailData) {
-    const { to, clientName, psychologistName, scheduledDate, scheduledTime, googleMeetLink, sessionId } = emailData;
+    const { 
+      to, 
+      clientName, 
+      psychologistName, 
+      scheduledDate, 
+      scheduledTime, 
+      googleMeetLink, 
+      sessionId,
+      calendarInvite,
+      googleCalendarLink,
+      outlookCalendarLink,
+      price
+    } = emailData;
 
     const mailOptions = {
       from: process.env.EMAIL_FROM || 'noreply@kuttikal.com',
@@ -121,8 +175,31 @@ class EmailService {
               <p><strong>Date:</strong> ${scheduledDate}</p>
               <p><strong>Time:</strong> ${scheduledTime}</p>
               <p><strong>Therapist:</strong> ${psychologistName}</p>
+              <p><strong>Session Fee:</strong> $${price || 'TBD'}</p>
               <p><strong>Session ID:</strong> ${sessionId}</p>
             </div>
+            
+            ${googleCalendarLink || outlookCalendarLink ? `
+            <div style="background: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
+              <h3 style="color: #856404; margin-top: 0;">📅 Add to Your Calendar</h3>
+              <p>Don't forget your appointment! Add it to your calendar:</p>
+              <div style="margin: 15px 0;">
+                ${googleCalendarLink ? `
+                <a href="${googleCalendarLink}" target="_blank" style="display: inline-block; background: #4285f4; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin: 5px; font-weight: bold;">
+                  📅 Add to Google Calendar
+                </a>
+                ` : ''}
+                ${outlookCalendarLink ? `
+                <a href="${outlookCalendarLink}" target="_blank" style="display: inline-block; background: #0078d4; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin: 5px; font-weight: bold;">
+                  📅 Add to Outlook
+                </a>
+                ` : ''}
+              </div>
+              <p style="font-size: 14px; color: #666; margin-top: 15px;">
+                💡 <strong>Tip:</strong> Adding this to your calendar will help you remember your appointment and receive automatic reminders.
+              </p>
+            </div>
+            ` : ''}
             
             ${googleMeetLink ? `
             <div style="background: #e8f5e8; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
@@ -161,14 +238,33 @@ class EmailService {
             </p>
           </div>
         </div>
-      `
+      `,
+      attachments: calendarInvite ? [
+        {
+          filename: calendarInvite.filename,
+          content: calendarInvite.content,
+          contentType: calendarInvite.contentType
+        }
+      ] : []
     };
 
     return this.transporter.sendMail(mailOptions);
   }
 
   async sendPsychologistConfirmation(emailData) {
-    const { to, clientName, psychologistName, scheduledDate, scheduledTime, googleMeetLink, sessionId } = emailData;
+    const { 
+      to, 
+      clientName, 
+      psychologistName, 
+      scheduledDate, 
+      scheduledTime, 
+      googleMeetLink, 
+      sessionId,
+      calendarInvite,
+      googleCalendarLink,
+      outlookCalendarLink,
+      price
+    } = emailData;
 
     const mailOptions = {
       from: process.env.EMAIL_FROM || 'noreply@kuttikal.com',
@@ -190,8 +286,28 @@ class EmailService {
               <p><strong>Date:</strong> ${scheduledDate}</p>
               <p><strong>Time:</strong> ${scheduledTime}</p>
               <p><strong>Client:</strong> ${clientName}</p>
+              <p><strong>Session Fee:</strong> $${price || 'TBD'}</p>
               <p><strong>Session ID:</strong> ${sessionId}</p>
             </div>
+            
+            ${googleCalendarLink || outlookCalendarLink ? `
+            <div style="background: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
+              <h3 style="color: #856404; margin-top: 0;">📅 Add to Your Calendar</h3>
+              <p>Add this session to your calendar:</p>
+              <div style="margin: 15px 0;">
+                ${googleCalendarLink ? `
+                <a href="${googleCalendarLink}" target="_blank" style="display: inline-block; background: #4285f4; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin: 5px; font-weight: bold;">
+                  📅 Add to Google Calendar
+                </a>
+                ` : ''}
+                ${outlookCalendarLink ? `
+                <a href="${outlookCalendarLink}" target="_blank" style="display: inline-block; background: #0078d4; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin: 5px; font-weight: bold;">
+                  📅 Add to Outlook
+                </a>
+                ` : ''}
+              </div>
+            </div>
+            ` : ''}
             
             ${googleMeetLink ? `
             <div style="background: #e8f5e8; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
@@ -230,7 +346,14 @@ class EmailService {
             </p>
           </div>
         </div>
-      `
+      `,
+      attachments: calendarInvite ? [
+        {
+          filename: calendarInvite.filename,
+          content: calendarInvite.content,
+          contentType: calendarInvite.contentType
+        }
+      ] : []
     };
 
     return this.transporter.sendMail(mailOptions);

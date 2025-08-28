@@ -437,16 +437,58 @@ const bookSession = async (req, res) => {
       } else {
         console.log('✅ Session updated with Google Meet details');
         
-        // Step 7: Send email notifications
+        // Step 7: Fetch real user emails and send notifications
         try {
-          console.log('🔍 Step 7: Sending email notifications');
+          console.log('🔍 Step 7: Fetching user details for email notifications');
+          
+          // Fetch client details with email
+          const { data: clientDetails, error: clientDetailsError } = await supabase
+            .from('clients')
+            .select(`
+              first_name, 
+              last_name, 
+              child_name,
+              user:users(email)
+            `)
+            .eq('id', client.id)
+            .single();
+
+          // Fetch psychologist details with email
+          const { data: psychologistDetails, error: psychologistDetailsError } = await supabase
+            .from('psychologists')
+            .select('first_name, last_name, email')
+            .eq('id', psychologist_id)
+            .single();
+
+          console.log('👤 Client details:', clientDetails);
+          console.log('👨‍⚕️ Psychologist details:', psychologistDetails);
+
+          if (clientDetailsError || !clientDetails) {
+            console.error('❌ Error fetching client details:', clientDetailsError);
+          }
+
+          if (psychologistDetailsError || !psychologistDetails) {
+            console.error('❌ Error fetching psychologist details:', psychologistDetailsError);
+          }
+
+          // Extract emails and names
+          const clientEmail = clientDetails?.user?.email || 'client@placeholder.com';
+          const psychologistEmail = psychologistDetails?.email || 'psychologist@placeholder.com';
+          const clientName = clientDetails?.child_name || `${clientDetails?.first_name || 'Client'} ${clientDetails?.last_name || ''}`.trim();
+          const psychologistName = `${psychologistDetails?.first_name || 'Psychologist'} ${psychologistDetails?.last_name || ''}`.trim();
+
+          console.log('📧 Email recipients:');
+          console.log('   - Client:', clientEmail, `(${clientName})`);
+          console.log('   - Psychologist:', psychologistEmail, `(${psychologistName})`);
+
+          console.log('🔍 Step 8: Sending email notifications');
           const emailService = require('../utils/emailService');
           
           const emailResult = await emailService.sendSessionConfirmation({
-            clientEmail: 'client@placeholder.com',
-            psychologistEmail: 'psychologist@placeholder.com',
-            clientName: 'Client',
-            psychologistName: 'Psychologist',
+            clientEmail,
+            psychologistEmail,
+            clientName,
+            psychologistName,
             sessionDate: updatedSession.scheduled_date,
             sessionTime: updatedSession.scheduled_time,
             price: updatedSession.price,
