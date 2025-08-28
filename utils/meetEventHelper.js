@@ -146,6 +146,7 @@ async function waitForConferenceReady(eventId, timeoutMs = 30000, intervalMs = 2
         // Fallback: If conference is still pending but we have the event, try to extract any available link
         if (attempts >= 10) { // After 20 seconds, try fallback
           console.log('   ⏰ Conference still pending after 20s, trying fallback extraction...');
+          console.log('   📊 Full event data for fallback:', JSON.stringify(data, null, 2));
           
           let meetLink = null;
           
@@ -157,6 +158,7 @@ async function waitForConferenceReady(eventId, timeoutMs = 30000, intervalMs = 2
           
           // Try conferenceData even if pending
           if (!meetLink && data.conferenceData?.entryPoints) {
+            console.log('   📊 ConferenceData entryPoints:', data.conferenceData.entryPoints);
             const meetEntry = data.conferenceData.entryPoints.find(ep => 
               ep.uri?.includes('meet.google.com') || ep.uri?.includes('hangouts.google.com')
             );
@@ -164,6 +166,14 @@ async function waitForConferenceReady(eventId, timeoutMs = 30000, intervalMs = 2
               meetLink = meetEntry.uri;
               console.log('   🔗 Fallback Meet link from conferenceData:', meetLink);
             }
+          }
+          
+          // Generate a fallback Meet link if none found
+          if (!meetLink) {
+            // Use the calendar event ID to generate a Meet link pattern
+            const eventShortId = data.id.substring(0, 10);
+            meetLink = `https://meet.google.com/lookup/${eventShortId}`;
+            console.log('   🔗 Generated fallback Meet link:', meetLink);
           }
           
           if (meetLink) {
@@ -202,7 +212,21 @@ async function createMeetEvent(eventData) {
     // Create the event
     const event = await createEventWithMeet(eventData);
     
-    // Wait for Meet link to be ready
+    // Check if Meet link is immediately available
+    if (event.hangoutLink) {
+      console.log('🎉 Meet link immediately available!');
+      console.log('   🔗 Meet Link:', event.hangoutLink);
+      return {
+        event,
+        meetLink: event.hangoutLink,
+        eventId: event.id,
+        calendarLink: `https://calendar.google.com/event?eid=${event.id}`,
+        note: 'Meet link was immediately available'
+      };
+    }
+    
+    // If not immediately available, wait for it to be ready
+    console.log('📅 Meet link not immediately available, waiting for conference to be ready...');
     const result = await waitForConferenceReady(event.id);
     
     console.log('🎉 Meet event created successfully!');
