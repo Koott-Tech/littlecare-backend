@@ -27,10 +27,10 @@ async function createEventWithMeet({
     const insert = await cal.events.insert({
       calendarId: 'primary',
       conferenceDataVersion: 1, // REQUIRED for conference create/read
-      sendUpdates: 'all',
+      sendUpdates: 'none', // Don't send updates since we can't invite attendees
       requestBody: {
         summary,
-        description,
+        description: `${description}\n\nAttendees:\n${attendees.map(a => `- ${a.email}`).join('\n')}`,
         location: location || 'Google Meet',
         start: { 
           dateTime: startISO, 
@@ -40,7 +40,7 @@ async function createEventWithMeet({
           dateTime: endISO, 
           timeZone: timezone 
         },
-        attendees,
+        // Removed attendees array to avoid Domain-Wide Delegation requirement
         conferenceData: {
           createRequest: { 
             requestId: crypto.randomUUID() // no type specified - let Google choose
