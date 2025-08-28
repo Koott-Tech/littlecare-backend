@@ -380,13 +380,20 @@ const bookSession = async (req, res) => {
       console.log('🔍 Step 5: Creating Google Meet link');
       const { createMeetEvent } = require('../utils/meetEventHelper');
 
+      // Format event data properly for meetEventHelper
+      const startDateTime = new Date(`${session.scheduled_date}T${session.scheduled_time}`);
+      const endDateTime = new Date(startDateTime.getTime() + 60 * 60000); // 60 minutes later
+      
       const meetEventResult = await createMeetEvent({
-        title: `Therapy Session - Client with Psychologist`,
-        date: session.scheduled_date,
-        time: session.scheduled_time,
-        clientEmail: 'client@placeholder.com', // Placeholder for now
-        psychologistEmail: 'psychologist@placeholder.com', // Placeholder for now
-        duration: 60
+        summary: `Therapy Session - Client with Psychologist`,
+        description: `Scheduled therapy session.\n\nJoin the meeting via Google Meet.`,
+        startISO: startDateTime.toISOString(),
+        endISO: endDateTime.toISOString(),
+        attendees: [
+          { email: 'client@placeholder.com' },
+          { email: 'psychologist@placeholder.com' }
+        ],
+        location: 'Google Meet'
       });
 
       console.log('📊 Meet event result:', meetEventResult);

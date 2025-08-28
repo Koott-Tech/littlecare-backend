@@ -20,7 +20,7 @@ async function createEventWithMeet({
     console.log('   🕐 End:', endISO);
     console.log('   👥 Attendees:', attendees.length);
     
-    const cal = calendar();
+    const cal = await calendar();
     const timezone = process.env.TIMEZONE || 'Asia/Kolkata';
     
     // Create event with conference data (no type specified - let Google choose)
@@ -86,7 +86,7 @@ async function waitForConferenceReady(eventId, timeoutMs = 30000, intervalMs = 2
   try {
     console.log('⏳ Waiting for conference to be ready...');
     
-    const cal = calendar();
+    const cal = await calendar();
     const start = Date.now();
     let attempts = 0;
     
