@@ -431,18 +431,32 @@ const bookSession = async (req, res) => {
         finalHour -= 24;
       }
       
-      // Create offset datetime for Google Calendar API
+      // Create offset datetime for Google Calendar API with proper date handling
       const offsetStartTime = `${String(finalHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
       const offsetEndHour = finalHour + 1;
-      const offsetEndTime = `${String(offsetEndHour >= 24 ? offsetEndHour - 24 : offsetEndHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
+      
+      // Handle date change when end time crosses midnight
+      let endDate = session.scheduled_date;
+      let endHour = offsetEndHour;
+      
+      if (offsetEndHour >= 24) {
+        endHour = offsetEndHour - 24;
+        // Add one day to the date
+        const date = new Date(session.scheduled_date);
+        date.setDate(date.getDate() + 1);
+        endDate = date.toISOString().split('T')[0];
+      }
+      
+      const offsetEndTime = `${String(endHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
       
       const startForGoogle = `${session.scheduled_date}T${offsetStartTime}+05:30`;
-      const endForGoogle = `${session.scheduled_date}T${offsetEndTime}+05:30`;
+      const endForGoogle = `${endDate}T${offsetEndTime}+05:30`;
       
       console.log('📅 Event timing (for Google Calendar):');
       console.log('   - User booked IST time:', session.scheduled_time);
       console.log('   - Offset applied for Google Calendar:', offsetStartTime);
-      console.log('   - Sending to Google:', startForGoogle);
+      console.log('   - Start for Google:', startForGoogle);
+      console.log('   - End for Google:', endForGoogle);
       console.log('   - Logic: Add 5.5 hours so Google Calendar displays correct IST time');
       
       const meetEventResult = await createMeetEvent({
