@@ -24,6 +24,11 @@ async function createEventWithMeet({
     const timezone = process.env.TIMEZONE || 'Asia/Kolkata';
     
     // Create event with conference data (no type specified - let Google choose)
+    console.log('📊 Sending to Google Calendar API:');
+    console.log('   - Start DateTime:', startISO);
+    console.log('   - End DateTime:', endISO);
+    console.log('   - TimeZone:', timezone);
+    
     const insert = await cal.events.insert({
       calendarId: 'primary',
       conferenceDataVersion: 1, // REQUIRED for conference create/read

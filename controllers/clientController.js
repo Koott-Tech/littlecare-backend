@@ -427,7 +427,8 @@ const bookSession = async (req, res) => {
       console.log('   - Original time:', startDateTimeString);
       console.log('   - Start for Google:', startForGoogle);
       console.log('   - End for Google:', endForGoogle);
-      console.log('   - Will be created in Asia/Kolkata timezone');
+      console.log('   - Timezone: Asia/Kolkata');
+      console.log('   - Expected: Event should show at 9:00 AM IST in Google Calendar');
       
       const meetEventResult = await createMeetEvent({
         summary: `Therapy Session - Client with Psychologist`,
