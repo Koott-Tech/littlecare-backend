@@ -33,10 +33,12 @@ async function createEventWithMeet({
         description: `${description}\n\nAttendees:\n${attendees.map(a => `- ${a.email}`).join('\n')}`,
         location: location || 'Google Meet',
         start: { 
-          dateTime: startISO
+          dateTime: startISO,
+          timeZone: timezone
         },
         end: { 
-          dateTime: endISO
+          dateTime: endISO,
+          timeZone: timezone
         },
         // Removed attendees array to avoid Domain-Wide Delegation requirement
         conferenceData: {

@@ -413,16 +413,15 @@ const bookSession = async (req, res) => {
       };
       
       // Create proper IST datetime - session.scheduled_time is already in IST
-      // We need to format it correctly for Google Calendar API
+      // Format without timezone offset and let Google Calendar API handle timezone
       const [hours, minutes, seconds] = session.scheduled_time.split(':');
       
-      // Create the datetime string directly with IST timezone offset
-      // This ensures Google Calendar interprets it as IST time
-      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}+05:30`;
+      // Create datetime string without timezone offset (local time)
+      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}`;
       
       // Calculate end time (1 hour later) 
       const endHour = String(parseInt(hours) + 1).padStart(2, '0');
-      const endForGoogle = `${session.scheduled_date}T${endHour}:${minutes}:${seconds}+05:30`;
+      const endForGoogle = `${session.scheduled_date}T${endHour}:${minutes}:${seconds}`;
       
       console.log('📅 Event timing (for Google Calendar):');
       console.log('   - Original time:', startDateTimeString);
