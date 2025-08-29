@@ -71,7 +71,7 @@ const calendar = async () => {
       console.log('🔐 Google service account authenticated successfully (env var)');
       
       const calendarClient = google.calendar({ version: 'v3', auth });
-      await ensureServiceAccountCalendarIsIST(calendarClient);
+      // Note: Service accounts don't need calendar timezone setting - handled in event creation
       return calendarClient;
     }
 
@@ -94,7 +94,7 @@ const calendar = async () => {
         console.log('🔐 Google service account authenticated successfully (file)');
         
         const calendarClient = google.calendar({ version: 'v3', auth });
-        await ensureServiceAccountCalendarIsIST(calendarClient);
+        // Note: Service accounts don't need calendar timezone setting - handled in event creation
         return calendarClient;
       }
     }

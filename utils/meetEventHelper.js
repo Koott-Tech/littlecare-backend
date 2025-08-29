@@ -2,6 +2,22 @@ const { calendar } = require('./googleOAuthClient');
 const crypto = require('crypto');
 
 /**
+ * Forces calendar links to display in IST timezone
+ * @param {string} htmlLink Original Google Calendar event link
+ * @returns {string} Modified link that displays in IST
+ */
+function forceISTDisplay(htmlLink) {
+  try {
+    const url = new URL(htmlLink);
+    url.searchParams.set("ctz", "Asia/Kolkata");
+    return url.toString();
+  } catch (error) {
+    console.warn('⚠️ Could not modify calendar link for IST display:', error.message);
+    return htmlLink; // Return original link if modification fails
+  }
+}
+
+/**
  * Logs IST confirmation for created events
  * @param {Object} event Google Calendar event object
  */
@@ -213,7 +229,7 @@ async function waitForConferenceReady(eventId, timeoutMs = 30000, intervalMs = 2
               event: data,
               meetLink,
               eventId: data.id,
-              calendarLink: `https://calendar.google.com/event?eid=${data.id}`,
+              calendarLink: forceISTDisplay(data.htmlLink || `https://calendar.google.com/event?eid=${data.id}`),
               note: 'Conference was pending but link extracted'
             };
           }
@@ -251,7 +267,7 @@ async function createMeetEvent(eventData) {
         event,
         meetLink: event.hangoutLink,
         eventId: event.id,
-        calendarLink: `https://calendar.google.com/event?eid=${event.id}`,
+        calendarLink: forceISTDisplay(event.htmlLink || `https://calendar.google.com/event?eid=${event.id}`),
         note: 'Meet link was immediately available'
       };
     }
@@ -262,7 +278,7 @@ async function createMeetEvent(eventData) {
     
     console.log('🎉 Meet event created successfully!');
     console.log('   🔗 Meet Link:', result.meetLink);
-    console.log('   📅 Calendar Link:', result.calendarLink);
+    console.log('   📅 Calendar Link (IST forced):', result.calendarLink);
     
     return result;
     
