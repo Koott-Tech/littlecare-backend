@@ -27,7 +27,7 @@ async function createEventWithMeet({
     console.log('📊 Sending to Google Calendar API:');
     console.log('   - Start DateTime:', startISO);
     console.log('   - End DateTime:', endISO);
-    console.log('   - TimeZone:', timezone);
+    console.log('   - Timezone: Included in datetime string (+05:30)');
     
     const insert = await cal.events.insert({
       calendarId: 'primary',
@@ -38,12 +38,10 @@ async function createEventWithMeet({
         description: `${description}\n\nAttendees:\n${attendees.map(a => `- ${a.email}`).join('\n')}`,
         location: location || 'Google Meet',
         start: { 
-          dateTime: startISO,
-          timeZone: timezone
+          dateTime: startISO
         },
         end: { 
-          dateTime: endISO,
-          timeZone: timezone
+          dateTime: endISO
         },
         // Removed attendees array to avoid Domain-Wide Delegation requirement
         conferenceData: {

@@ -412,23 +412,23 @@ const bookSession = async (req, res) => {
         return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
       };
       
-      // Create proper IST datetime - session.scheduled_time is already in IST
-      // Send the exact user time with timezone field - let Google handle the conversion
+      // Create proper IST datetime with timezone offset in the datetime string itself
+      // Use format: "2025-08-30T22:00:00+05:30" (no separate timezone field)
       const [hours, minutes, seconds] = session.scheduled_time.split(':');
       
-      // Use the exact IST time from user booking (NO manual offset)
-      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}`;
+      // Add IST timezone offset directly to datetime string
+      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}+05:30`;
       
       // Calculate end time (1 hour later in IST)
       const endHour = String(parseInt(hours) + 1).padStart(2, '0');
-      const endForGoogle = `${session.scheduled_date}T${endHour}:${minutes}:${seconds}`;
+      const endForGoogle = `${session.scheduled_date}T${endHour}:${minutes}:${seconds}+05:30`;
       
       console.log('📅 Event timing (for Google Calendar):');
       console.log('   - User booked IST time:', session.scheduled_time);
-      console.log('   - Sending exact time to Google:', startForGoogle);
-      console.log('   - End time:', endForGoogle);
-      console.log('   - Timezone: Asia/Kolkata');
-      console.log('   - Logic: NO manual offset - let Google handle timezone conversion');
+      console.log('   - Sending with timezone offset:', startForGoogle);
+      console.log('   - End time with offset:', endForGoogle);
+      console.log('   - Format: RFC3339 with +05:30 offset');
+      console.log('   - Logic: Include timezone in datetime string, no separate timezone field');
       
       const meetEventResult = await createMeetEvent({
         summary: `Therapy Session - Client with Psychologist`,
