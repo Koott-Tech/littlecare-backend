@@ -71,8 +71,7 @@ async function createEventWithMeet({
         // Removed attendees array to avoid Domain-Wide Delegation requirement
         conferenceData: {
           createRequest: { 
-            requestId: crypto.randomUUID(),
-            conferenceSolutionKey: { type: "hangoutsMeet" } // explicitly request Google Meet
+            requestId: crypto.randomUUID() // let Google choose the conference type
           }
         },
         reminders: {

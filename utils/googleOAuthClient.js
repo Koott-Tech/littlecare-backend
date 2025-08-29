@@ -19,21 +19,31 @@ const ensureServiceAccountCalendarIsIST = async (calendarClient) => {
   try {
     console.log('🌏 Setting service account calendar timezone to IST...');
     
-    // Set the calendar's default timezone to IST
-    await calendarClient.calendars.patch({
-      calendarId: 'primary',
-      requestBody: { timeZone: 'Asia/Kolkata' }
-    });
+    // Try to update the CalendarList entry first (more likely to work)
+    try {
+      await calendarClient.calendarList.update({
+        calendarId: 'primary',
+        requestBody: { timeZone: 'Asia/Kolkata' }
+      });
+      console.log('✅ CalendarList timezone set to Asia/Kolkata');
+    } catch (calListError) {
+      console.warn('⚠️ Could not set CalendarList timezone:', calListError.message);
+    }
 
-    // Also update the CalendarList entry so any subscribed views default to IST
-    await calendarClient.calendarList.update({
-      calendarId: 'primary',
-      requestBody: { timeZone: 'Asia/Kolkata' }
-    });
+    // Try to set the calendar's default timezone (may not work for service accounts)
+    try {
+      await calendarClient.calendars.patch({
+        calendarId: 'primary',
+        requestBody: { timeZone: 'Asia/Kolkata' }
+      });
+      console.log('✅ Calendar timezone set to Asia/Kolkata');
+    } catch (calError) {
+      console.warn('⚠️ Could not set calendar timezone:', calError.message);
+      console.log('💡 This is normal for service accounts - timezone will be handled in event creation');
+    }
 
-    console.log('✅ Service account calendar timezone set to Asia/Kolkata');
   } catch (error) {
-    console.warn('⚠️ Could not set calendar timezone:', error.message);
+    console.warn('⚠️ Timezone setting failed:', error.message);
   }
 };
 
