@@ -449,8 +449,9 @@ const bookSession = async (req, res) => {
       
       const offsetEndTime = `${String(endHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
       
-      const startForGoogle = `${session.scheduled_date}T${offsetStartTime}+05:30`;
-      const endForGoogle = `${endDate}T${offsetEndTime}+05:30`;
+      // Try different approach: use offset time with timezone field instead of +05:30 in string
+      const startForGoogle = `${session.scheduled_date}T${offsetStartTime}`;
+      const endForGoogle = `${endDate}T${offsetEndTime}`;
       
       console.log('📅 Event timing (for Google Calendar):');
       console.log('   - User booked IST time:', session.scheduled_time);

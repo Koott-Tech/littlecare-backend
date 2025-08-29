@@ -336,6 +336,17 @@ const getClientSessions = async (req, res) => {
       );
     }
 
+    // Debug: Log session times being returned to frontend
+    if (sessions && sessions.length > 0) {
+      console.log('🔍 Sessions being returned to dashboard:');
+      sessions.forEach((session, index) => {
+        console.log(`   Session ${index + 1}:`);
+        console.log(`   - Date: ${session.scheduled_date}`);
+        console.log(`   - Time: ${session.scheduled_time}`);
+        console.log(`   - Status: ${session.status}`);
+      });
+    }
+
     res.json(
       successResponse({
         sessions,
