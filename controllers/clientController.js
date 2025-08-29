@@ -412,12 +412,17 @@ const bookSession = async (req, res) => {
         return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
       };
       
-      // Use the original time directly (this will be interpreted as IST by Google Calendar)
-      // session.scheduled_time is already in HH:MM:SS format from database
-      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}`;
-      const endTime = session.scheduled_time.split(':');
-      const endHour = String(parseInt(endTime[0]) + 1).padStart(2, '0');
-      const endForGoogle = `${session.scheduled_date}T${endHour}:${endTime[1]}:${endTime[2]}`;
+      // Create proper IST datetime - session.scheduled_time is in IST
+      // We need to create a Date object in IST timezone and format it properly
+      const [hours, minutes, seconds] = session.scheduled_time.split(':');
+      
+      // Create IST datetime by parsing as local time in IST
+      const startDateIST = new Date(`${session.scheduled_date}T${session.scheduled_time}+05:30`);
+      const endDateIST = new Date(startDateIST.getTime() + 60 * 60000); // 1 hour later
+      
+      // Format as ISO string with IST timezone offset
+      const startForGoogle = startDateIST.toISOString().replace('Z', '+05:30');
+      const endForGoogle = endDateIST.toISOString().replace('Z', '+05:30');
       
       console.log('📅 Event timing (for Google Calendar):');
       console.log('   - Original time:', startDateTimeString);
