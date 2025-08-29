@@ -235,11 +235,11 @@ const bookSession = async (req, res) => {
     if (package_id && package_id !== 'null' && package_id !== 'undefined') {
       console.log('📦 Validating package...');
       const { data: packageData, error: packageError } = await supabase
-        .from('packages')
-        .select('*')
-        .eq('id', package_id)
-        .eq('psychologist_id', psychologist_id)
-        .single();
+      .from('packages')
+      .select('*')
+      .eq('id', package_id)
+      .eq('psychologist_id', psychologist_id)
+      .single();
 
       console.log('📦 Package lookup result:', packageData);
       console.log('📦 Package lookup error:', packageError);
@@ -247,8 +247,8 @@ const bookSession = async (req, res) => {
       if (!packageData) {
         console.log('❌ Package validation failed');
         return res.status(400).json(
-          errorResponse('Package not found or does not belong to this psychologist')
-        );
+        errorResponse('Package not found or does not belong to this psychologist')
+      );
       }
       
       package = packageData;
@@ -412,17 +412,17 @@ const bookSession = async (req, res) => {
         return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
       };
       
-      // Create proper IST datetime - session.scheduled_time is in IST
-      // We need to create a Date object in IST timezone and format it properly
+      // Create proper IST datetime - session.scheduled_time is already in IST
+      // We need to format it correctly for Google Calendar API
       const [hours, minutes, seconds] = session.scheduled_time.split(':');
       
-      // Create IST datetime by parsing as local time in IST
-      const startDateIST = new Date(`${session.scheduled_date}T${session.scheduled_time}+05:30`);
-      const endDateIST = new Date(startDateIST.getTime() + 60 * 60000); // 1 hour later
+      // Create the datetime string directly with IST timezone offset
+      // This ensures Google Calendar interprets it as IST time
+      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}+05:30`;
       
-      // Format as ISO string with IST timezone offset
-      const startForGoogle = startDateIST.toISOString().replace('Z', '+05:30');
-      const endForGoogle = endDateIST.toISOString().replace('Z', '+05:30');
+      // Calculate end time (1 hour later) 
+      const endHour = String(parseInt(hours) + 1).padStart(2, '0');
+      const endForGoogle = `${session.scheduled_date}T${endHour}:${minutes}:${seconds}+05:30`;
       
       console.log('📅 Event timing (for Google Calendar):');
       console.log('   - Original time:', startDateTimeString);
