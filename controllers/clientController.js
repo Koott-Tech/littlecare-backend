@@ -413,39 +413,22 @@ const bookSession = async (req, res) => {
       };
       
       // Create proper IST datetime - session.scheduled_time is already in IST
-      // Google Calendar treats our input as UTC and converts to IST by subtracting 5:30
-      // So we need to add 5:30 to our IST time to compensate
+      // Send the exact user time with timezone field - let Google handle the conversion
       const [hours, minutes, seconds] = session.scheduled_time.split(':');
       
-      // Add IST offset (5 hours 30 minutes) to the scheduled time
-      const targetHour = parseInt(hours) + 5; // Add 5 hours
-      const targetMinute = parseInt(minutes) + 30; // Add 30 minutes
+      // Use the exact IST time from user booking (NO manual offset)
+      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}`;
       
-      // Handle minute and hour overflow
-      let finalHour = targetHour;
-      let finalMinute = targetMinute;
-      if (finalMinute >= 60) {
-        finalHour += 1;
-        finalMinute -= 60;
-      }
-      if (finalHour >= 24) {
-        finalHour -= 24;
-      }
-      
-      // Format the adjusted times
-      const adjustedStartTime = `${String(finalHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
-      const endHour = finalHour + 1;
-      const adjustedEndTime = `${String(endHour >= 24 ? endHour - 24 : endHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
-      
-      const startForGoogle = `${session.scheduled_date}T${adjustedStartTime}`;
-      const endForGoogle = `${session.scheduled_date}T${adjustedEndTime}`;
+      // Calculate end time (1 hour later in IST)
+      const endHour = String(parseInt(hours) + 1).padStart(2, '0');
+      const endForGoogle = `${session.scheduled_date}T${endHour}:${minutes}:${seconds}`;
       
       console.log('📅 Event timing (for Google Calendar):');
-      console.log('   - Original IST time:', session.scheduled_time);
-      console.log('   - Adjusted for Google (UTC+5:30):', startForGoogle);
-      console.log('   - End time (UTC+5:30):', endForGoogle);
+      console.log('   - User booked IST time:', session.scheduled_time);
+      console.log('   - Sending exact time to Google:', startForGoogle);
+      console.log('   - End time:', endForGoogle);
       console.log('   - Timezone: Asia/Kolkata');
-      console.log('   - Logic: Adding 5:30 offset so Google shows correct IST time');
+      console.log('   - Logic: NO manual offset - let Google handle timezone conversion');
       
       const meetEventResult = await createMeetEvent({
         summary: `Therapy Session - Client with Psychologist`,
