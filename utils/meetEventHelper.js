@@ -2,6 +2,31 @@ const { calendar } = require('./googleOAuthClient');
 const crypto = require('crypto');
 
 /**
+ * Logs IST confirmation for created events
+ * @param {Object} event Google Calendar event object
+ */
+function logIstConfirmation(event) {
+  const utc = event.start?.dateTime; // e.g., "2025-08-30T16:30:00Z"
+  const tz = event.start?.timeZone; // "Asia/Kolkata"
+
+  if (utc) {
+    // Sanity: 16:30Z + 5:30 = 22:00 IST
+    const istTime = new Date(utc).toLocaleString("en-IN", { 
+      timeZone: "Asia/Kolkata", 
+      hour12: true,
+      year: 'numeric',
+      month: 'long', 
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric'
+    });
+    console.log('🌏 IST Verification:', istTime);
+    console.log('   - UTC Time:', utc);
+    console.log('   - Timezone:', tz);
+  }
+}
+
+/**
  * Create an event with Google Meet link
  * Uses Calendar API with conferenceData (no Meet API needed)
  */
@@ -46,7 +71,8 @@ async function createEventWithMeet({
         // Removed attendees array to avoid Domain-Wide Delegation requirement
         conferenceData: {
           createRequest: { 
-            requestId: crypto.randomUUID() // no type specified - let Google choose
+            requestId: crypto.randomUUID(),
+            conferenceSolutionKey: { type: "hangoutsMeet" } // explicitly request Google Meet
           }
         },
         reminders: {
@@ -61,6 +87,9 @@ async function createEventWithMeet({
     
     const eventData = insert.data;
     console.log('   ✅ Calendar event created with ID:', eventData.id);
+    
+    // IST verification log
+    logIstConfirmation(eventData);
     
     if (eventData.conferenceData) {
       console.log('   🔗 Conference Data Created:');

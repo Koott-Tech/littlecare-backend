@@ -12,6 +12,32 @@ const SERVICE_ACCOUNT_PATHS = [
 ];
 
 /**
+ * Ensures the service account calendar timezone is set to IST
+ * @param {Object} calendarClient Google Calendar client
+ */
+const ensureServiceAccountCalendarIsIST = async (calendarClient) => {
+  try {
+    console.log('🌏 Setting service account calendar timezone to IST...');
+    
+    // Set the calendar's default timezone to IST
+    await calendarClient.calendars.patch({
+      calendarId: 'primary',
+      requestBody: { timeZone: 'Asia/Kolkata' }
+    });
+
+    // Also update the CalendarList entry so any subscribed views default to IST
+    await calendarClient.calendarList.update({
+      calendarId: 'primary',
+      requestBody: { timeZone: 'Asia/Kolkata' }
+    });
+
+    console.log('✅ Service account calendar timezone set to Asia/Kolkata');
+  } catch (error) {
+    console.warn('⚠️ Could not set calendar timezone:', error.message);
+  }
+};
+
+/**
  * Creates and returns a Google Calendar client using service account or OAuth2
  * @returns {Object} Google Calendar client instance
  */
@@ -33,7 +59,10 @@ const calendar = async () => {
 
       await auth.authorize();
       console.log('🔐 Google service account authenticated successfully (env var)');
-      return google.calendar({ version: 'v3', auth });
+      
+      const calendarClient = google.calendar({ version: 'v3', auth });
+      await ensureServiceAccountCalendarIsIST(calendarClient);
+      return calendarClient;
     }
 
     // Try service account from file (Render secret files or local)
@@ -53,7 +82,10 @@ const calendar = async () => {
 
         await auth.authorize();
         console.log('🔐 Google service account authenticated successfully (file)');
-        return google.calendar({ version: 'v3', auth });
+        
+        const calendarClient = google.calendar({ version: 'v3', auth });
+        await ensureServiceAccountCalendarIsIST(calendarClient);
+        return calendarClient;
       }
     }
 
