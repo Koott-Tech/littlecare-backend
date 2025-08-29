@@ -412,23 +412,38 @@ const bookSession = async (req, res) => {
         return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
       };
       
-      // Create proper IST datetime with timezone offset in the datetime string itself
-      // Use format: "2025-08-30T22:00:00+05:30" (no separate timezone field)
+      // Add manual IST offset for Google Calendar to compensate for display issue
+      // This makes Google Calendar show the correct IST time (8 PM IST shows as 8 PM)
       const [hours, minutes, seconds] = session.scheduled_time.split(':');
       
-      // Add IST timezone offset directly to datetime string
-      const startForGoogle = `${session.scheduled_date}T${session.scheduled_time}+05:30`;
+      // Add 5.5 hours to compensate for Google Calendar timezone handling
+      const offsetHours = parseInt(hours) + 5;
+      const offsetMinutes = parseInt(minutes) + 30;
       
-      // Calculate end time (1 hour later in IST)
-      const endHour = String(parseInt(hours) + 1).padStart(2, '0');
-      const endForGoogle = `${session.scheduled_date}T${endHour}:${minutes}:${seconds}+05:30`;
+      // Handle minute and hour overflow
+      let finalHour = offsetHours;
+      let finalMinute = offsetMinutes;
+      if (finalMinute >= 60) {
+        finalHour += 1;
+        finalMinute -= 60;
+      }
+      if (finalHour >= 24) {
+        finalHour -= 24;
+      }
+      
+      // Create offset datetime for Google Calendar API
+      const offsetStartTime = `${String(finalHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
+      const offsetEndHour = finalHour + 1;
+      const offsetEndTime = `${String(offsetEndHour >= 24 ? offsetEndHour - 24 : offsetEndHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
+      
+      const startForGoogle = `${session.scheduled_date}T${offsetStartTime}+05:30`;
+      const endForGoogle = `${session.scheduled_date}T${offsetEndTime}+05:30`;
       
       console.log('📅 Event timing (for Google Calendar):');
       console.log('   - User booked IST time:', session.scheduled_time);
-      console.log('   - Sending with timezone offset:', startForGoogle);
-      console.log('   - End time with offset:', endForGoogle);
-      console.log('   - Format: RFC3339 with +05:30 offset');
-      console.log('   - Logic: Include timezone in datetime string, no separate timezone field');
+      console.log('   - Offset applied for Google Calendar:', offsetStartTime);
+      console.log('   - Sending to Google:', startForGoogle);
+      console.log('   - Logic: Add 5.5 hours so Google Calendar displays correct IST time');
       
       const meetEventResult = await createMeetEvent({
         summary: `Therapy Session - Client with Psychologist`,
