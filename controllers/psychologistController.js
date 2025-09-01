@@ -722,6 +722,73 @@ const deletePackage = async (req, res) => {
   }
 };
 
+// Complete session with summary and notes
+const completeSession = async (req, res) => {
+  try {
+    const psychologistId = req.user.id;
+    const { sessionId } = req.params;
+    const { session_summary, session_notes, status = 'completed' } = req.body;
+
+    // Check if session exists and belongs to psychologist
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .eq('psychologist_id', psychologistId)
+      .single();
+
+    if (!session) {
+      return res.status(404).json(
+        errorResponse('Session not found')
+      );
+    }
+
+    // Validate required fields
+    if (!session_summary || session_summary.trim().length === 0) {
+      return res.status(400).json(
+        errorResponse('Session summary is required')
+      );
+    }
+
+    // Prepare update data
+    const updateData = {
+      status: status,
+      session_summary: session_summary.trim(),
+      updated_at: new Date().toISOString()
+    };
+
+    // Add session notes if provided (optional)
+    if (session_notes && session_notes.trim().length > 0) {
+      updateData.session_notes = session_notes.trim();
+    }
+
+    // Update session
+    const { data: updatedSession, error } = await supabase
+      .from('sessions')
+      .update(updateData)
+      .eq('id', sessionId)
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Complete session error:', error);
+      return res.status(500).json(
+        errorResponse('Failed to complete session')
+      );
+    }
+
+    res.json(
+      successResponse(updatedSession, 'Session completed successfully with summary and notes')
+    );
+
+  } catch (error) {
+    console.error('Complete session error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while completing session')
+    );
+  }
+};
+
 // Respond to reschedule request
 const respondToRescheduleRequest = async (req, res) => {
   try {
@@ -808,6 +875,7 @@ module.exports = {
   updateProfile,
   getSessions,
   updateSession,
+  completeSession,
   getAvailability,
   addAvailability,
   updateAvailability,

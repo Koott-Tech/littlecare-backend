@@ -13,4 +13,7 @@ router.get('/admin/all', authenticateToken, sessionController.getAllSessions);
 router.put('/:sessionId/status', authenticateToken, sessionController.updateSessionStatus);
 router.delete('/:sessionId', authenticateToken, sessionController.deleteSession);
 
+// Reschedule request handling (psychologist only)
+router.put('/reschedule-request/:notificationId', authenticateToken, sessionController.handleRescheduleRequest);
+
 module.exports = router;

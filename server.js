@@ -13,6 +13,7 @@ const superadminRoutes = require('./routes/superadmin');
 const availabilityRoutes = require('./routes/availability');
 const oauthRoutes = require('./routes/oauth');
 const meetRoutes = require('./routes/meet');
+const notificationRoutes = require('./routes/notifications');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -561,6 +562,140 @@ app.delete('/api/debug/clear-test-data', async (req, res) => {
   }
 });
 
+// TEMPORARY: Seed availability for testing
+app.post('/api/debug/seed-availability', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    const { psychologist_id, date, time_slots } = req.body;
+
+    if (!psychologist_id || !date || !Array.isArray(time_slots)) {
+      return res.status(400).json({
+        success: false,
+        error: 'psychologist_id, date (YYYY-MM-DD), and time_slots (array like ["10:00 AM"]) are required'
+      });
+    }
+
+    // Upsert availability
+    const { data: existing } = await supabase
+      .from('availability')
+      .select('*')
+      .eq('psychologist_id', psychologist_id)
+      .eq('date', date)
+      .single();
+
+    if (existing) {
+      const { data, error } = await supabase
+        .from('availability')
+        .update({ time_slots, is_available: true })
+        .eq('id', existing.id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      res.json({ success: true, data, message: 'Availability updated' });
+    } else {
+      const { data, error } = await supabase
+        .from('availability')
+        .insert({ psychologist_id, date, time_slots, is_available: true })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      res.json({ success: true, data, message: 'Availability created' });
+    }
+  } catch (error) {
+    console.error('Error seeding availability:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// TEMPORARY: Check sessions for a specific date and psychologist
+app.get('/api/debug/sessions/:psychologist_id/:date', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    const { psychologist_id, date } = req.params;
+
+    const { data: sessions, error } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('psychologist_id', psychologist_id)
+      .eq('scheduled_date', date);
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        date,
+        psychologist_id,
+        sessions: sessions || []
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// TEMPORARY: Reset user password
+app.post('/api/debug/reset-password', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    const bcrypt = require('bcrypt');
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email and newPassword are required'
+      });
+    }
+
+    // Hash the new password
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update the user's password
+    const { data, error } = await supabase
+      .from('users')
+      .update({ password_hash: hashedPassword })
+      .eq('email', email)
+      .select('id, email, role');
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Password updated successfully',
+      data: data[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Public endpoint to get psychologist availability (no authentication required)
 // This is now handled by the availability routes with better Google Calendar integration
 
@@ -572,6 +707,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/availability', availabilityRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api', oauthRoutes);
 app.use('/api', meetRoutes);
 

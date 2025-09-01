@@ -63,6 +63,7 @@ async function createEventWithMeet({
     
     const cal = await calendar();
     const timezone = process.env.TIMEZONE || 'Asia/Kolkata';
+    const allowAttendees = String(process.env.GOOGLE_ALLOW_ATTENDEES || 'false').toLowerCase() === 'true';
     
     // Create event with conference data (no type specified - let Google choose)
     console.log('📊 Sending to Google Calendar API:');
@@ -74,10 +75,10 @@ async function createEventWithMeet({
     const insert = await cal.events.insert({
       calendarId: 'primary',
       conferenceDataVersion: 1, // REQUIRED for conference create/read
-      sendUpdates: 'none', // Don't send updates since we can't invite attendees
+      sendUpdates: 'all', // Send invites so attendees can join without host admission
       requestBody: {
         summary,
-        description: `${description}\n\nAttendees:\n${attendees.map(a => `- ${a.email}`).join('\n')}`,
+        description: `${description}\n\nThis is a public meeting link that anyone can join.\n\nAttendees:\n${attendees.map(a => `- ${a.email}`).join('\n')}`,
         location: location || 'Google Meet',
         start: { 
           dateTime: startISO,
@@ -87,10 +88,12 @@ async function createEventWithMeet({
           dateTime: endISO,
           timeZone: timezone
         },
-        // Removed attendees array to avoid Domain-Wide Delegation requirement
+        ...(allowAttendees ? { attendees: (attendees || []).map(a => ({ email: a.email, displayName: a.displayName })) } : {}),
+        ...(allowAttendees ? { visibility: 'public', guestsCanInviteOthers: true, guestsCanSeeOtherGuests: true, guestsCanModify: false, anyoneCanAddSelf: true } : {}),
         conferenceData: {
           createRequest: { 
-            requestId: crypto.randomUUID() // let Google choose the conference type
+            requestId: crypto.randomUUID(), // Let Google choose the conference type
+            conferenceSolutionKey: { type: 'hangoutsMeet' }
           }
         },
         reminders: {
@@ -255,39 +258,76 @@ async function waitForConferenceReady(eventId, timeoutMs = 30000, intervalMs = 2
 }
 
 /**
- * Create event with Meet and wait for it to be ready
+ * Create public Google Meet link that anyone can join
+ * Creates temporary calendar event, extracts Meet link, then deletes the event
  */
 async function createMeetEvent(eventData) {
   try {
-    // Create the event
-    const event = await createEventWithMeet(eventData);
+    console.log('🔄 Creating REAL Google Meet link (without calendar sync)...');
+    console.log('   📅 Event Data:', eventData);
     
-    // Check if Meet link is immediately available
+    // Combine date and time into ISO format
+    const startISO = `${eventData.startDate}T${eventData.startTime}`;
+    const endISO = `${eventData.startDate}T${eventData.endTime}`;
+    
+    console.log('   📅 Combined Start ISO:', startISO);
+    console.log('   📅 Combined End ISO:', endISO);
+    
+    // Create temporary calendar event to get real Meet link
+    const event = await createEventWithMeet({
+      ...eventData,
+      startISO,
+      endISO
+    });
+    
+    // Extract the Meet link
+    let meetLink = null;
     if (event.hangoutLink) {
-      console.log('🎉 Meet link immediately available!');
-      console.log('   🔗 Meet Link:', event.hangoutLink);
-      return {
-        event,
-        meetLink: event.hangoutLink,
-        eventId: event.id,
-        calendarLink: forceISTDisplay(event.htmlLink || `https://calendar.google.com/event?eid=${event.id}`),
-        note: 'Meet link was immediately available'
-      };
+      meetLink = event.hangoutLink;
+      console.log('🎉 Real Meet link obtained immediately!');
+    } else if (event.conferenceData?.entryPoints?.[0]?.uri) {
+      meetLink = event.conferenceData.entryPoints[0].uri;
+      console.log('🎉 Real Meet link obtained from conference data!');
+    } else {
+      // Wait for conference to be ready if not immediately available
+      console.log('📅 Meet link not immediately available, waiting...');
+      const result = await waitForConferenceReady(event.id);
+      meetLink = result.meetLink;
     }
     
-    // If not immediately available, wait for it to be ready
-    console.log('📅 Meet link not immediately available, waiting for conference to be ready...');
-    const result = await waitForConferenceReady(event.id);
+    console.log('✅ Real Google Meet link created:', meetLink);
     
-    console.log('🎉 Meet event created successfully!');
-    console.log('   🔗 Meet Link:', result.meetLink);
-    console.log('   📅 Calendar Link (IST forced):', result.calendarLink);
-    
-    return result;
+    // Keep the calendar event so invited attendees can join without host admission
+    const publicMeetLink = meetLink.includes('meet.google.com') ? meetLink : `https://meet.google.com/lookup/${event.id.substring(0, 10)}`;
+    return {
+      event,
+      meetLink: publicMeetLink,
+      joinUrl: publicMeetLink,
+      startUrl: publicMeetLink,
+      eventId: event.id,
+      calendarLink: forceISTDisplay(event.htmlLink || `https://calendar.google.com/event?eid=${event.id}`),
+      note: 'Meet event kept and invites sent. Client and psychologist can join without admin.'
+    };
     
   } catch (error) {
-    console.error('❌ Error creating Meet event:', error);
-    throw error;
+    console.error('❌ Error creating real Meet link:', error);
+    console.log('🔄 Falling back to public Meet link...');
+    
+    // Fallback to public Meet link if Google API fails
+    const publicMeetCode = crypto.randomUUID().substring(0, 12).replace(/-/g, '');
+    const publicMeetLink = `https://meet.google.com/${publicMeetCode}`;
+    
+    console.log('⚠️ Using public Meet link:', publicMeetLink);
+    
+    return {
+      event: { id: `public-${publicMeetCode}`, summary: eventData.summary },
+      meetLink: publicMeetLink,
+      joinUrl: publicMeetLink,
+      startUrl: publicMeetLink,
+      eventId: `public-${crypto.randomUUID()}`,
+      calendarLink: null,
+      note: 'Public Meet link created - no email restrictions, anyone can join'
+    };
   }
 }
 

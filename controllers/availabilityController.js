@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const { successResponse, errorResponse } = require('../utils/helpers');
-const googleCalendarService = require('../utils/googleCalendarService');
+// COMMENTED OUT: Google Calendar sync disabled
+// const googleCalendarService = require('../utils/googleCalendarService');
 
 // Set psychologist availability
 const setAvailability = async (req, res) => {
@@ -110,7 +111,8 @@ const setAvailability = async (req, res) => {
       availability = newAvailability;
     }
 
-    // Sync with Google Calendar (optional - for blocking time)
+    // COMMENTED OUT: Google Calendar sync (optional - for blocking time)
+    /*
     try {
       // This could create "busy" blocks in Google Calendar
       // Implementation depends on your specific requirements
@@ -118,6 +120,8 @@ const setAvailability = async (req, res) => {
       console.error('Error syncing with Google Calendar:', googleError);
       // Continue even if Google Calendar sync fails
     }
+    */
+    console.log('ℹ️  Google Calendar sync disabled - availability set without calendar sync');
 
     res.json(
       successResponse(availability, 'Availability set successfully')
@@ -166,12 +170,12 @@ const getAvailability = async (req, res) => {
       );
     }
 
-    // Get booked sessions for the same period
+    // Get booked sessions for the same period (exclude cancelled sessions)
     let sessionsQuery = supabase
       .from('sessions')
-      .select('scheduled_date, scheduled_time, status')
+      .select('scheduled_date, scheduled_time, status, id')
       .eq('psychologist_id', psychologist_id)
-      .in('status', ['booked', 'rescheduled']);
+      .in('status', ['booked', 'rescheduled', 'confirmed']);
 
     if (start_date) {
       sessionsQuery = sessionsQuery.gte('scheduled_date', start_date);
@@ -180,22 +184,33 @@ const getAvailability = async (req, res) => {
       sessionsQuery = sessionsQuery.lte('scheduled_date', end_date);
     }
 
-    const { data: bookedSessions } = await sessionsQuery;
+    const { data: bookedSessions, error: sessionsError } = await sessionsQuery;
+    
+    if (sessionsError) {
+      console.error('Error fetching booked sessions:', sessionsError);
+    }
 
-    // Combine availability with booked sessions
+    console.log(`📅 Found ${bookedSessions?.length || 0} booked sessions for psychologist ${psychologist_id}`);
+
+    // Combine availability with booked sessions - remove booked slots in real-time
     const availabilityWithBookings = availability.map(avail => {
-      const bookedTimes = bookedSessions
+      const bookedTimes = (bookedSessions || [])
         .filter(session => session.scheduled_date === avail.date)
         .map(session => session.scheduled_time);
 
+      // Filter out booked time slots from available slots
       const availableSlots = avail.time_slots.filter(slot => 
         !bookedTimes.includes(slot)
       );
 
+      console.log(`📅 Date ${avail.date}: ${avail.time_slots.length} total slots, ${bookedTimes.length} booked, ${availableSlots.length} available`);
+
       return {
         ...avail,
         available_slots: availableSlots,
-        booked_slots: bookedTimes
+        booked_slots: bookedTimes,
+        total_slots: avail.time_slots.length,
+        available_count: availableSlots.length
       };
     });
 

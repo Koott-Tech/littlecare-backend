@@ -25,13 +25,13 @@ class AvailabilityCalendarService {
         throw new Error('Psychologist not found');
       }
 
-      // Get existing sessions from database for this date
+      // Get existing sessions from database for this date (include all active session statuses)
       const { data: existingSessions, error: sessionsError } = await supabase
         .from('sessions')
-        .select('scheduled_time, status')
+        .select('scheduled_time, status, id')
         .eq('psychologist_id', psychologistId)
         .eq('scheduled_date', date)
-        .eq('status', 'booked');
+        .in('status', ['booked', 'rescheduled', 'confirmed']);
       
       if (sessionsError) {
         console.error('Error fetching existing sessions:', sessionsError);
@@ -59,10 +59,11 @@ class AvailabilityCalendarService {
       const blockedSlots = new Set();
       
       // Add database sessions
+      console.log(`📊 Found ${existingSessions.length} existing sessions for ${date}`);
       existingSessions.forEach(session => {
         const timeSlot = session.scheduled_time;
         blockedSlots.add(timeSlot);
-        console.log(`   🚫 Blocked slot from DB: ${timeSlot}`);
+        console.log(`   🚫 Blocked slot from DB: ${timeSlot} (${session.status}, ID: ${session.id})`);
       });
 
       // Add calendar events (if available)
@@ -185,13 +186,66 @@ class AvailabilityCalendarService {
 
       console.log(`📊 Found ${availabilityData.length} availability records in date range`);
 
+      // Get all booked sessions in the date range to filter them out
+      const { data: bookedSessions, error: sessionsError } = await supabase
+        .from('sessions')
+        .select('scheduled_date, scheduled_time, status, id')
+        .eq('psychologist_id', psychologistId)
+        .gte('scheduled_date', startDate)
+        .lte('scheduled_date', endDate)
+        .in('status', ['booked', 'rescheduled', 'confirmed']);
+
+      if (sessionsError) {
+        console.error('Error fetching booked sessions:', sessionsError);
+      }
+
+      console.log(`🔒 Found ${bookedSessions?.length || 0} booked sessions in date range`);
+
+      // Helper function to convert 24-hour format to 12-hour format
+      const convertTo12Hour = (time24) => {
+        // Handle if time is already in 12-hour format
+        if (time24.includes('AM') || time24.includes('PM')) {
+          return time24;
+        }
+        
+        const [hours, minutes] = time24.split(':');
+        const hour = parseInt(hours);
+        const minute = minutes || '00';
+        
+        if (hour === 0) {
+          return `12:${minute} AM`;
+        } else if (hour < 12) {
+          return `${hour}:${minute} AM`;
+        } else if (hour === 12) {
+          return `12:${minute} PM`;
+        } else {
+          return `${hour - 12}:${minute} PM`;
+        }
+      };
+
+      // Create a map of booked sessions by date (convert to 12-hour format to match availability)
+      const bookedSlotsByDate = {};
+      (bookedSessions || []).forEach(session => {
+        if (!bookedSlotsByDate[session.scheduled_date]) {
+          bookedSlotsByDate[session.scheduled_date] = new Set();
+        }
+        
+        const time12Hour = convertTo12Hour(session.scheduled_time);
+        bookedSlotsByDate[session.scheduled_date].add(time12Hour);
+        console.log(`   🚫 Blocked: ${session.scheduled_date} at ${session.scheduled_time} → ${time12Hour} (${session.status})`);
+      });
+
       // Create availability for each date in range
       const availability = [];
       const currentDate = new Date(startDate);
       const end = new Date(endDate);
       
       while (currentDate <= end) {
-        const dateStr = currentDate.toISOString().split('T')[0];
+        // Use local date formatting to avoid timezone conversion issues
+        const year = currentDate.getFullYear();
+        const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+        const day = String(currentDate.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
         
         // Find availability record for this date
         const dayAvailability = availabilityData.find(avail => avail.date === dateStr);
@@ -199,36 +253,38 @@ class AvailabilityCalendarService {
         if (dayAvailability && dayAvailability.is_available) {
           // Use the time slots from availability table
           const timeSlots = dayAvailability.time_slots || [];
+          const bookedSlots = bookedSlotsByDate[dateStr] || new Set();
           
-          // Convert string time slots to proper format
-          const formattedTimeSlots = timeSlots.map(timeString => ({
-            time: timeString,
-            available: true,
-            displayTime: timeString
-          }));
+          // Create formatted time slots showing both available and blocked
+          const formattedTimeSlots = timeSlots.map(timeString => {
+            const isBooked = bookedSlots.has(timeString);
+            return {
+              time: timeString,
+              available: !isBooked,
+              displayTime: timeString,
+              status: isBooked ? 'booked' : 'available'
+            };
+          });
+          
+          const availableTimeSlots = formattedTimeSlots.filter(slot => slot.available);
+          const blockedTimeSlots = formattedTimeSlots.filter(slot => !slot.available);
           
           const dayData = {
             date: dateStr,
             psychologistId,
             timeSlots: formattedTimeSlots,
             totalSlots: timeSlots.length,
-            availableSlots: timeSlots.length,
-            blockedSlots: 0
+            availableSlots: availableTimeSlots.length,
+            blockedSlots: blockedTimeSlots.length
           };
           
+          console.log(`📅 ${dateStr}: ${timeSlots.length} total, ${availableTimeSlots.length} available, ${dayData.blockedSlots} blocked`);
           availability.push(dayData);
         } else {
-          // No availability set for this date - show as unavailable
-          const dayData = {
-            date: dateStr,
-            psychologistId,
-            timeSlots: [],
-            totalSlots: 0,
-            availableSlots: 0,
-            blockedSlots: 0
-          };
-          
-          availability.push(dayData);
+          // No availability record - skip this date entirely
+          // Only show dates that actually have availability records
+          console.log(`📅 ${dateStr}: No availability record - skipping`);
+          // Don't add this date to availability array
         }
         
         currentDate.setDate(currentDate.getDate() + 1);

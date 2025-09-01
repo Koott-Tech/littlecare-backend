@@ -5,6 +5,8 @@ const {
   formatDate,
   formatTime
 } = require('../utils/helpers');
+const availabilityService = require('../utils/availabilityCalendarService');
+const { createMeetEvent } = require('../utils/meetEventHelper');
 
 // Get client profile
 const getProfile = async (req, res) => {
@@ -175,71 +177,68 @@ const getSessions = async (req, res) => {
   }
 };
 
-// Book a session
+// Book a new session
 const bookSession = async (req, res) => {
   try {
-    const userId = req.user.id;
+    console.log('🚀 Starting session booking process...');
     const { psychologist_id, package_id, scheduled_date, scheduled_time, price } = req.body;
 
-    console.log('🚀 ===== SESSION BOOKING DEBUG START =====');
-    console.log('📅 Session Booking Request:', {
-      psychologist_id,
-      package_id,
-      scheduled_date,
-      scheduled_time,
-      price,
-      userId,
-      environment: process.env.NODE_ENV || 'development',
-      timestamp: new Date().toISOString()
-    });
-    console.log('🔍 Request Headers:', req.headers);
-    console.log('🔍 Full Request Body:', req.body);
+    // Validate required fields
+    if (!psychologist_id || !scheduled_date || !scheduled_time) {
+      return res.status(400).json(
+        errorResponse('Missing required fields: psychologist_id, scheduled_date, scheduled_time')
+      );
+    }
 
-    // Get client ID
-    console.log('🔍 Step 1: Getting client ID for user:', userId);
-    const { data: client } = await supabase
+    // Get client_id from authenticated user
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Check if user is a client
+    if (userRole !== 'client') {
+      return res.status(403).json(
+        errorResponse('Only clients can book sessions')
+      );
+    }
+
+    // Get client profile from clients table
+    const { data: client, error: clientError } = await supabase
       .from('clients')
       .select('id')
       .eq('user_id', userId)
       .single();
 
-    console.log('👤 Client lookup result:', client);
-
-    if (!client) {
+    if (clientError || !client) {
+      console.error('Client profile not found:', clientError);
       return res.status(404).json(
-        errorResponse('Client profile not found')
+        errorResponse('Client profile not found. Please complete your profile first.')
       );
     }
 
-    // Check if psychologist exists
-    const { data: psychologist } = await supabase
-      .from('psychologists')
-      .select('id')
-      .eq('id', psychologist_id)
-      .single();
+    const clientId = client.id;
 
-    if (!psychologist) {
-      return res.status(404).json(
-        errorResponse('Psychologist not found')
-      );
-    }
+    console.log('🔍 Step 1: Client validation');
+    console.log('   - Client ID:', clientId);
+    console.log('   - User ID:', userId);
+    console.log('   - User Role:', userRole);
 
+    // Step 2: Package validation
     console.log('🔍 Step 2: Package validation');
     console.log('📦 Package ID provided:', package_id);
     console.log('📦 Package ID type:', typeof package_id);
     console.log('📦 Package ID truthiness:', !!package_id);
-    
+
     let package = null;
-    
-    // Only validate package if package_id is provided and not null/undefined
-    if (package_id && package_id !== 'null' && package_id !== 'undefined') {
+
+    // Only validate package if package_id is provided and not null/undefined (and not individual)
+    if (package_id && package_id !== 'null' && package_id !== 'undefined' && package_id !== 'individual') {
       console.log('📦 Validating package...');
       const { data: packageData, error: packageError } = await supabase
-      .from('packages')
-      .select('*')
-      .eq('id', package_id)
-      .eq('psychologist_id', psychologist_id)
-      .single();
+        .from('packages')
+        .select('*')
+        .eq('id', package_id)
+        .eq('psychologist_id', psychologist_id)
+        .single();
 
       console.log('📦 Package lookup result:', packageData);
       console.log('📦 Package lookup error:', packageError);
@@ -247,346 +246,214 @@ const bookSession = async (req, res) => {
       if (!packageData) {
         console.log('❌ Package validation failed');
         return res.status(400).json(
-        errorResponse('Package not found or does not belong to this psychologist')
-      );
+          errorResponse('Package not found or does not belong to this psychologist')
+        );
       }
-      
+
       package = packageData;
       console.log('✅ Package validation passed');
     } else {
       console.log('📦 No package validation needed (package_id not provided)');
     }
 
-    // Check if date is in the future
-    const sessionDate = new Date(scheduled_date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    if (sessionDate <= today) {
+    // Step 3: Check if the time slot is available using availability service
+    console.log('🔍 Step 3: Checking time slot availability...');
+    const isAvailable = await availabilityService.isTimeSlotAvailable(
+      psychologist_id, 
+      scheduled_date, 
+      scheduled_time
+    );
+
+    if (!isAvailable) {
       return res.status(400).json(
-        errorResponse('Session date must be in the future')
+        errorResponse('This time slot is not available. Please select another time.')
       );
     }
 
-    // Check if time slot is available
-    console.log('🔍 Step 3: Availability validation');
-    console.log('📅 Checking availability for:');
-    console.log('   - Psychologist ID:', psychologist_id);
-    console.log('   - Date:', scheduled_date);
-    console.log('   - Time:', scheduled_time);
-    
-    // Convert 24-hour time to 12-hour format for availability check
-    const convertTo12Hour = (time24) => {
-      const [hours, minutes] = time24.split(':');
-      const hour = parseInt(hours, 10);
-      const ampm = hour >= 12 ? 'PM' : 'AM';
-      const hour12 = hour % 12 || 12;
-      return `${hour12}:${minutes} ${ampm}`;
-    };
-    
-    const scheduled_time_12h = convertTo12Hour(scheduled_time);
-    console.log('🕐 Time format conversion:');
-    console.log('   - 24-hour format:', scheduled_time);
-    console.log('   - 12-hour format:', scheduled_time_12h);
-    
-    const { data: availability, error: availabilityError } = await supabase
-      .from('availability')
-      .select('time_slots')
-      .eq('psychologist_id', psychologist_id)
-      .eq('date', scheduled_date)
-      .eq('is_available', true)
+    console.log('✅ Time slot is available');
+
+    // Step 4: Get client and psychologist details for Google Calendar
+    console.log('🔍 Step 4: Fetching user details for Google Calendar...');
+    const { data: clientDetails, error: clientDetailsError } = await supabase
+      .from('clients')
+      .select(`
+        first_name, 
+        last_name, 
+        child_name,
+        user:users(email)
+      `)
+      .eq('id', clientId)
       .single();
 
-    console.log('📊 Availability query result:', availability);
-    console.log('📊 Availability query error:', availabilityError);
-    
-    if (availability && availability.time_slots) {
-      console.log('📋 Available time slots:', availability.time_slots);
-      console.log('🔍 Looking for time slot (24h):', scheduled_time);
-      console.log('🔍 Looking for time slot (12h):', scheduled_time_12h);
-      console.log('📋 Time slot type:', typeof scheduled_time);
-      console.log('📋 Available slots types:', availability.time_slots.map(slot => typeof slot));
-      console.log('✅ Includes check result (12h):', availability.time_slots.includes(scheduled_time_12h));
-    }
-
-    // Check availability using 12-hour format
-    if (!availability || !availability.time_slots.includes(scheduled_time_12h)) {
-      console.log('❌ Availability check failed');
-      console.log('   - Availability exists:', !!availability);
-      console.log('   - Time slots:', availability?.time_slots);
-      console.log('   - Requested time (24h):', scheduled_time);
-      console.log('   - Requested time (12h):', scheduled_time_12h);
-      return res.status(400).json(
-        errorResponse('Selected time slot is not available')
+    if (clientDetailsError || !clientDetails) {
+      console.error('Error fetching client details:', clientDetailsError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch client details')
       );
     }
-    
-    console.log('✅ Availability check passed');
 
-    // Check if time slot is already booked
-    console.log('🔍 Step 4: Checking for existing sessions');
-    console.log('   - Psychologist ID:', psychologist_id);
-    console.log('   - Date (raw):', scheduled_date);
-    console.log('   - Date (formatted):', formatDate(scheduled_date));
-    console.log('   - Time (raw):', scheduled_time);
-    console.log('   - Time (formatted):', formatTime(scheduled_time));
-
-    const { data: existingSession, error: existingSessionError } = await supabase
-      .from('sessions')
-      .select('id, scheduled_date, scheduled_time, status, client_id')
-      .eq('psychologist_id', psychologist_id)
-      .eq('scheduled_date', formatDate(scheduled_date))
-      .eq('scheduled_time', formatTime(scheduled_time))
-      .in('status', ['booked', 'rescheduled'])
+    const { data: psychologistDetails, error: psychologistDetailsError } = await supabase
+      .from('psychologists')
+      .select('first_name, last_name, email')
+      .eq('id', psychologist_id)
       .single();
 
-    console.log('📊 Existing session query result:', existingSession);
-    console.log('📊 Existing session query error:', existingSessionError);
-
-    if (existingSession) {
-      console.log('❌ Time slot already booked by session:', existingSession);
-      return res.status(400).json(
-        errorResponse('This time slot is already booked')
+    if (psychologistDetailsError || !psychologistDetails) {
+      console.error('Error fetching psychologist details:', psychologistDetailsError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch psychologist details')
       );
     }
 
-    console.log('✅ No existing sessions found - time slot is free');
+    console.log('✅ User details fetched successfully');
 
-    // Create session
-    console.log('🔍 Step 5: Creating session');
+    // Step 5: Create Google Calendar event with OAuth2 Meet service
+    console.log('🔍 Step 5: Creating Google Calendar event...');
+    let meetData = null;
+    try {
+      meetData = await createMeetEvent({
+        summary: `Therapy Session - ${clientDetails?.child_name || 'Client'} with ${psychologistDetails?.first_name || 'Psychologist'}`,
+        description: `Therapy session between ${clientDetails?.child_name || 'Client'} and ${psychologistDetails?.first_name || 'Psychologist'}`,
+        startDate: scheduled_date,
+        startTime: scheduled_time,
+        endTime: addMinutesToTime(scheduled_time, 50), // 50-minute session
+        attendees: [
+          { email: clientDetails.user?.email || 'client@placeholder.com' },
+          { email: psychologistDetails?.email || 'psychologist@placeholder.com' }
+        ]
+      });
+
+      console.log('✅ Google Calendar event created successfully');
+      console.log('   - Meet Link:', meetData.meetLink);
+      console.log('   - Event ID:', meetData.eventId);
+      console.log('   - Calendar Link:', meetData.calendarLink);
+    } catch (meetError) {
+      console.error('❌ Google Calendar event creation failed:', meetError);
+      // Continue without Meet link if it fails
+      meetData = {
+        meetLink: null,
+        eventId: null,
+        calendarLink: null
+      };
+    }
+
+    // Step 6: Create session record
+    console.log('🔍 Step 6: Creating session record...');
     const sessionData = {
-      client_id: client.id,
+      client_id: clientId,
       psychologist_id,
       scheduled_date: formatDate(scheduled_date),
       scheduled_time: formatTime(scheduled_time),
       status: 'booked',
-      price: price || (package?.price || 0)
+      google_calendar_event_id: meetData.eventId,
+      google_meet_link: meetData.meetLink,
+      google_calendar_link: meetData.calendarLink,
+      price: price || (package?.price || 100) // Default to $100 for individual sessions
     };
-    
-    // Only add package_id if it's provided and valid
-    if (package_id && package_id !== 'null' && package_id !== 'undefined') {
+
+    // Only add package_id if it's provided and valid (not individual)
+    if (package_id && package_id !== 'null' && package_id !== 'undefined' && package_id !== 'individual') {
       sessionData.package_id = package_id;
     }
-    
-    console.log('💾 Session data to insert:', sessionData);
-    
+
     const { data: session, error: sessionError } = await supabase
       .from('sessions')
       .insert([sessionData])
       .select('*')
       .single();
 
-    console.log('💾 Session creation result:', session);
-    console.log('💾 Session creation error:', sessionError);
-
     if (sessionError) {
-      console.error('Session booking error:', sessionError);
+      console.error('❌ Session creation failed:', sessionError);
       return res.status(500).json(
-        errorResponse('Failed to book session')
+        errorResponse('Failed to create session')
       );
     }
 
-    console.log('✅ Session created successfully, now creating Google Meet link...');
+    console.log('✅ Session record created successfully');
+    console.log('   - Session ID:', session.id);
+    console.log('   - Status:', session.status);
+    console.log('   - Price:', session.price);
 
-          // Step 6: Create Google Meet link
+    // Step 7: If this is a package purchase, create client package record
+    if (package && package.session_count > 1 && package.id !== 'individual') {
+      console.log('🔍 Step 7: Creating client package record...');
+      console.log('📦 Package details:', package);
+      
       try {
-        console.log('🔍 Step 6: Creating Google Meet link');
-      const { createMeetEvent } = require('../utils/meetEventHelper');
+        const clientPackageData = {
+          client_id: clientId,
+          psychologist_id,
+          package_id: package.id,
+          package_type: package.package_type,
+          total_sessions: package.session_count,
+          remaining_sessions: package.session_count - 1, // First session already booked
+          total_amount: package.price,
+          amount_paid: package.price,
+          status: 'active',
+          purchased_at: new Date().toISOString(),
+          first_session_id: session.id
+        };
 
-      // Format event data properly for Google Calendar API in IST
-      // Create datetime strings in the format Google Calendar expects for IST timezone
-      const startDateTimeString = `${session.scheduled_date}T${session.scheduled_time}`;
-      const startDateTime = new Date(`${startDateTimeString}+05:30`); // Parse as IST
-      const endDateTime = new Date(startDateTime.getTime() + 60 * 60000); // 60 minutes later
-      
-      // Format for Google Calendar API (without timezone indicator, let Google handle timezone)
-      const formatForGoogleCalendar = (date) => {
-        // Get IST time components
-        const istDate = new Date(date.getTime());
-        const year = istDate.getUTCFullYear();
-        const month = String(istDate.getUTCMonth() + 1).padStart(2, '0');
-        const day = String(istDate.getUTCDate()).padStart(2, '0');
-        const hours = String(istDate.getUTCHours()).padStart(2, '0');
-        const minutes = String(istDate.getUTCMinutes()).padStart(2, '0');
-        const seconds = String(istDate.getUTCSeconds()).padStart(2, '0');
-        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
-      };
-      
-      // Add manual IST offset for Google Calendar to compensate for display issue
-      // This makes Google Calendar show the correct IST time (8 PM IST shows as 8 PM)
-      const [hours, minutes, seconds] = session.scheduled_time.split(':');
-      
-      // Add 5.5 hours to compensate for Google Calendar timezone handling
-      const offsetHours = parseInt(hours) + 5;
-      const offsetMinutes = parseInt(minutes) + 30;
-      
-      // Handle minute and hour overflow
-      let finalHour = offsetHours;
-      let finalMinute = offsetMinutes;
-      if (finalMinute >= 60) {
-        finalHour += 1;
-        finalMinute -= 60;
+        const { error: clientPackageError } = await supabase
+          .from('client_packages')
+          .insert([clientPackageData]);
+
+        if (clientPackageError) {
+          console.error('❌ Client package creation failed:', clientPackageError);
+          // Continue even if client package creation fails
+        } else {
+          console.log('✅ Client package record created successfully');
+          console.log('   - Remaining sessions:', package.session_count - 1);
+        }
+      } catch (packageError) {
+        console.error('❌ Exception while creating client package:', packageError);
+        // Continue even if client package creation fails
       }
-      if (finalHour >= 24) {
-        finalHour -= 24;
-      }
+    }
+
+    // Step 8: Send email notifications
+    console.log('🔍 Step 8: Sending email notifications...');
+    try {
+      const emailService = require('../utils/emailService');
       
-      // Create offset datetime for Google Calendar API with proper date handling
-      const offsetStartTime = `${String(finalHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
-      const offsetEndHour = finalHour + 1;
-      
-      // Handle date change when end time crosses midnight
-      let endDate = session.scheduled_date;
-      let endHour = offsetEndHour;
-      
-      if (offsetEndHour >= 24) {
-        endHour = offsetEndHour - 24;
-        // Add one day to the date
-        const date = new Date(session.scheduled_date);
-        date.setDate(date.getDate() + 1);
-        endDate = date.toISOString().split('T')[0];
-      }
-      
-      const offsetEndTime = `${String(endHour).padStart(2, '0')}:${String(finalMinute).padStart(2, '0')}:${seconds}`;
-      
-      // Try different approach: use offset time with timezone field instead of +05:30 in string
-      const startForGoogle = `${session.scheduled_date}T${offsetStartTime}`;
-      const endForGoogle = `${endDate}T${offsetEndTime}`;
-      
-      console.log('📅 Event timing (for Google Calendar):');
-      console.log('   - User booked IST time:', session.scheduled_time);
-      console.log('   - Offset applied for Google Calendar:', offsetStartTime);
-      console.log('   - Start for Google:', startForGoogle);
-      console.log('   - End for Google:', endForGoogle);
-      console.log('   - Logic: Add 5.5 hours so Google Calendar displays correct IST time');
-      
-      const meetEventResult = await createMeetEvent({
-        summary: `Therapy Session - Client with Psychologist`,
-        description: `Scheduled therapy session.\n\nJoin the meeting via Google Meet.`,
-        startISO: startForGoogle,
-        endISO: endForGoogle,
-        attendees: [
-          { email: 'client@placeholder.com' },
-          { email: 'psychologist@placeholder.com' }
-        ],
-        location: 'Google Meet'
+      const clientName = clientDetails.child_name || 
+                        `${clientDetails.first_name} ${clientDetails.last_name}`.trim();
+      const psychologistName = `${psychologistDetails.first_name} ${psychologistDetails.last_name}`.trim();
+
+      await emailService.sendSessionConfirmation({
+        clientEmail: clientDetails.user?.email || 'client@placeholder.com',
+        psychologistEmail: psychologistDetails?.email || 'psychologist@placeholder.com',
+        clientName,
+        psychologistName,
+        sessionId: session.id,
+        scheduledDate: scheduled_date,
+        scheduledTime: scheduled_time,
+        meetLink: meetData.meetLink,
+        price: session.price
       });
 
-      console.log('📊 Meet event result:', meetEventResult);
-
-      // Update session with Google Meet details
-      const meetUpdateData = {
-        google_meet_link: meetEventResult.meetLink,
-        google_meet_join_url: meetEventResult.joinUrl || meetEventResult.meetLink,
-        google_meet_start_url: meetEventResult.startUrl || meetEventResult.meetLink,
-        google_calendar_event_id: meetEventResult.eventId
-      };
-
-      console.log('💾 Updating session with Meet data:', meetUpdateData);
-
-      const { data: updatedSession, error: updateError } = await supabase
-        .from('sessions')
-        .update(meetUpdateData)
-        .eq('id', session.id)
-        .select('*')
-        .single();
-
-      if (updateError) {
-        console.error('❌ Error updating session with Meet details:', updateError);
-        console.log('✅ Session booked successfully (Meet link creation failed)');
-        return res.status(201).json(
-          successResponse(session, 'Session booked successfully (Meet link creation failed)')
-        );
-      } else {
-        console.log('✅ Session updated with Google Meet details');
-        
-        // Step 7: Fetch real user emails and send notifications
-        try {
-          console.log('🔍 Step 7: Fetching user details for email notifications');
-          
-          // Fetch client details with email
-          const { data: clientDetails, error: clientDetailsError } = await supabase
-            .from('clients')
-            .select(`
-              first_name, 
-              last_name, 
-              child_name,
-              user:users(email)
-            `)
-            .eq('id', client.id)
-            .single();
-
-          // Fetch psychologist details with email
-          const { data: psychologistDetails, error: psychologistDetailsError } = await supabase
-            .from('psychologists')
-            .select('first_name, last_name, email')
-            .eq('id', psychologist_id)
-            .single();
-
-          console.log('👤 Client details:', clientDetails);
-          console.log('👨‍⚕️ Psychologist details:', psychologistDetails);
-
-          if (clientDetailsError || !clientDetails) {
-            console.error('❌ Error fetching client details:', clientDetailsError);
-          }
-
-          if (psychologistDetailsError || !psychologistDetails) {
-            console.error('❌ Error fetching psychologist details:', psychologistDetailsError);
-          }
-
-          // Extract emails and names
-          const clientEmail = clientDetails?.user?.email || 'client@placeholder.com';
-          const psychologistEmail = psychologistDetails?.email || 'psychologist@placeholder.com';
-          const clientName = clientDetails?.child_name || `${clientDetails?.first_name || 'Client'} ${clientDetails?.last_name || ''}`.trim();
-          const psychologistName = `${psychologistDetails?.first_name || 'Psychologist'} ${psychologistDetails?.last_name || ''}`.trim();
-
-          console.log('📧 Email recipients:');
-          console.log('   - Client:', clientEmail, `(${clientName})`);
-          console.log('   - Psychologist:', psychologistEmail, `(${psychologistName})`);
-
-          console.log('🔍 Step 8: Sending email notifications');
-          const emailService = require('../utils/emailService');
-          
-          const emailResult = await emailService.sendSessionConfirmation({
-            clientEmail,
-            psychologistEmail,
-            clientName,
-            psychologistName,
-            sessionDate: updatedSession.scheduled_date,
-            sessionTime: updatedSession.scheduled_time,
-            price: updatedSession.price,
-            meetLink: updatedSession.google_meet_link,
-            sessionId: updatedSession.id
-          });
-
-          console.log('📧 Email result:', emailResult);
-          console.log('✅ Session booking completed successfully with Meet link and email notifications');
-        } catch (emailError) {
-          console.error('❌ Error sending email notifications:', emailError);
-          console.log('✅ Session booked successfully with Meet link (email failed)');
-        }
-
-        console.log('🚀 ===== SESSION BOOKING DEBUG END =====');
-        return res.status(201).json(
-          successResponse(updatedSession, 'Session booked successfully with Google Meet link')
-        );
-      }
-
-    } catch (error) {
-      console.error('❌ Error creating Meet link:', error);
-      console.log('✅ Session booked successfully (Meet link creation failed)');
-      console.log('🚀 ===== SESSION BOOKING DEBUG END =====');
-      return res.status(201).json(
-        successResponse(session, 'Session booked successfully (Meet link creation failed)')
-      );
+      console.log('✅ Email notifications sent successfully');
+    } catch (emailError) {
+      console.error('❌ Error sending email notifications:', emailError);
+      // Continue even if email fails
     }
 
+    console.log('✅ Session booking completed successfully with Meet link and email notifications');
+    res.status(201).json(
+      successResponse({
+        session,
+        meetLink: meetData.meetLink,
+        calendarLink: meetData.calendarLink,
+        package: package && package.id !== 'individual' ? {
+          type: package.package_type,
+          remaining_sessions: package.session_count - 1,
+          total_amount: package.price
+        } : null
+      }, 'Session booked successfully')
+    );
+
   } catch (error) {
-    console.error('❌ BOOKING ERROR:', error);
-    console.error('❌ Error stack:', error.stack);
-    console.error('❌ Error message:', error.message);
-    console.log('🚀 ===== SESSION BOOKING DEBUG END (ERROR) =====');
-    
+    console.error('❌ Session booking error:', error);
     res.status(500).json(
       errorResponse('Internal server error while booking session')
     );
@@ -813,12 +680,408 @@ const getAvailablePsychologists = async (req, res) => {
   }
 };
 
+// Reschedule session with new date/time selection
+const rescheduleSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { new_date, new_time, psychologist_id } = req.body;
+    const userId = req.user.id;
+
+    console.log('🔄 Starting session reschedule process');
+    console.log('   - Session ID:', sessionId);
+    console.log('   - New Date:', new_date);
+    console.log('   - New Time:', new_time);
+    console.log('   - Psychologist ID:', psychologist_id);
+
+    // Validate required fields
+    if (!new_date || !new_time || !psychologist_id) {
+      return res.status(400).json(
+        errorResponse('Missing required fields: new_date, new_time, psychologist_id')
+      );
+    }
+
+    // Get client ID
+    const { data: client } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (!client) {
+      return res.status(404).json(
+        errorResponse('Client profile not found')
+      );
+    }
+
+    // Get existing session and verify ownership
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .eq('client_id', client.id)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json(
+        errorResponse('Session not found or access denied')
+      );
+    }
+
+    // Check if session can be rescheduled
+    if (session.status === 'completed' || session.status === 'cancelled') {
+      return res.status(400).json(
+        errorResponse('Cannot reschedule completed or cancelled sessions')
+      );
+    }
+
+    // Check if new time slot is available
+    const { data: conflictingSessions } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('psychologist_id', psychologist_id)
+      .eq('scheduled_date', formatDate(new_date))
+      .eq('scheduled_time', formatTime(new_time))
+      .in('status', ['booked', 'rescheduled', 'confirmed'])
+      .neq('id', sessionId); // Exclude current session
+
+    if (conflictingSessions && conflictingSessions.length > 0) {
+      return res.status(400).json(
+        errorResponse('Selected time slot is already booked')
+      );
+    }
+
+    // Update session with new date/time
+    const { data: updatedSession, error: updateError } = await supabase
+      .from('sessions')
+      .update({
+        scheduled_date: formatDate(new_date),
+        scheduled_time: formatTime(new_time),
+        status: 'rescheduled',
+        reschedule_count: (session.reschedule_count || 0) + 1,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sessionId)
+      .select('*')
+      .single();
+
+    if (updateError) {
+      console.error('Error updating session:', updateError);
+      return res.status(500).json(
+        errorResponse('Failed to reschedule session')
+      );
+    }
+
+    // Create notification for psychologist
+    await createRescheduleNotification(session, updatedSession, client.id);
+
+    // Send email notifications (keeping this functionality)
+    try {
+      await sendRescheduleEmails(session, updatedSession, psychologist_id);
+    } catch (emailError) {
+      console.error('Error sending reschedule emails:', emailError);
+      // Continue even if email fails
+    }
+
+    console.log('✅ Session rescheduled successfully');
+    res.json(
+      successResponse(updatedSession, 'Session rescheduled successfully')
+    );
+
+  } catch (error) {
+    console.error('Reschedule session error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while rescheduling session')
+    );
+  }
+};
+
+// Helper function to add minutes to time
+const addMinutesToTime = (time, minutes) => {
+  const [hours, mins] = time.split(':').map(Number);
+  const totalMinutes = hours * 60 + mins + minutes;
+  const newHours = Math.floor(totalMinutes / 60);
+  const newMins = totalMinutes % 60;
+  return `${newHours.toString().padStart(2, '0')}:${newMins.toString().padStart(2, '0')}`;
+};
+
+// Helper function to get reschedule count for a session
+const getRescheduleCount = async (sessionId) => {
+  try {
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('reschedule_count')
+      .eq('id', sessionId)
+      .single();
+    
+    return session?.reschedule_count || 0;
+  } catch (error) {
+    console.error('Error getting reschedule count:', error);
+    return 0;
+  }
+};
+
+// Helper function to create reschedule request
+const createRescheduleRequest = async (session, newDate, newTime, clientId, reason) => {
+  try {
+    // Get client details
+    const { data: clientDetails } = await supabase
+      .from('clients')
+      .select('first_name, last_name, child_name')
+      .eq('id', clientId)
+      .single();
+
+    const clientName = clientDetails?.child_name || 
+                      `${clientDetails?.first_name || 'Client'} ${clientDetails?.last_name || ''}`.trim();
+
+    // Create reschedule request notification
+    const notificationData = {
+      psychologist_id: session.psychologist_id,
+      type: 'reschedule_request',
+      title: 'Reschedule Request',
+      message: `${clientName} has requested to reschedule their session from ${session.scheduled_date} at ${session.scheduled_time} to ${newDate} at ${newTime}. Reason: ${reason}`,
+      session_id: session.id,
+      client_id: clientId,
+      is_read: false,
+      created_at: new Date().toISOString(),
+      metadata: {
+        request_type: 'reschedule',
+        new_date: newDate,
+        new_time: newTime,
+        reason: reason,
+        original_date: session.scheduled_date,
+        original_time: session.scheduled_time
+      }
+    };
+
+    const { error: notificationError } = await supabase
+      .from('notifications')
+      .insert([notificationData]);
+
+    if (notificationError) {
+      console.error('Error creating reschedule request notification:', notificationError);
+      return { success: false, error: notificationError };
+    }
+
+    console.log('✅ Reschedule request notification created');
+    return { 
+      success: true, 
+      data: { 
+        message: 'Reschedule request sent to psychologist',
+        notification: notificationData 
+      } 
+    };
+
+  } catch (error) {
+    console.error('Error creating reschedule request:', error);
+    return { success: false, error };
+  }
+};
+
+// Helper function to create reschedule notification
+const createRescheduleNotification = async (originalSession, updatedSession, clientId) => {
+  try {
+    // Get client and psychologist details
+    const { data: clientDetails } = await supabase
+      .from('clients')
+      .select('first_name, last_name, child_name')
+      .eq('id', clientId)
+      .single();
+
+    const clientName = clientDetails?.child_name || 
+                      `${clientDetails?.first_name || 'Client'} ${clientDetails?.last_name || ''}`.trim();
+
+    // Format dates for notification
+    const originalDate = new Date(originalSession.scheduled_date);
+    const newDate = new Date(updatedSession.scheduled_date);
+    
+    const formatDateForNotification = (date, time) => {
+      return new Date(`${date}T${time}+05:30`).toLocaleDateString('en-IN', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        timeZone: 'Asia/Kolkata'
+      });
+    };
+
+    const formatTimeForNotification = (time) => {
+      const [hours, minutes] = time.split(':');
+      const date = new Date();
+      date.setHours(parseInt(hours), parseInt(minutes));
+      return date.toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Kolkata'
+      });
+    };
+
+    // Create notification record
+    const notificationData = {
+      psychologist_id: updatedSession.psychologist_id,
+      type: 'session_rescheduled',
+      title: 'Session Rescheduled',
+      message: `${clientName} has rescheduled their session from ${formatDateForNotification(originalSession.scheduled_date, originalSession.scheduled_time)} at ${formatTimeForNotification(originalSession.scheduled_time)} to ${formatDateForNotification(updatedSession.scheduled_date, updatedSession.scheduled_time)} at ${formatTimeForNotification(updatedSession.scheduled_time)}`,
+      session_id: updatedSession.id,
+      client_id: clientId,
+      is_read: false,
+      created_at: new Date().toISOString()
+    };
+
+    const { error: notificationError } = await supabase
+      .from('notifications')
+      .insert([notificationData]);
+
+    if (notificationError) {
+      console.error('Error creating notification:', notificationError);
+    } else {
+      console.log('✅ Reschedule notification created');
+    }
+
+  } catch (error) {
+    console.error('Error creating reschedule notification:', error);
+  }
+};
+
+// Helper function to send reschedule emails
+const sendRescheduleEmails = async (originalSession, updatedSession, psychologistId) => {
+  try {
+    console.log('📧 Sending reschedule email notifications...');
+    
+    // Get client and psychologist details for email
+    const { data: clientDetails } = await supabase
+      .from('clients')
+      .select('first_name, last_name, child_name, user:users(email)')
+      .eq('id', originalSession.client_id)
+      .single();
+
+    const { data: psychologistDetails } = await supabase
+      .from('psychologists')
+      .select('first_name, last_name, email')
+      .eq('id', psychologistId)
+      .single();
+
+    if (clientDetails && psychologistDetails) {
+      const emailService = require('../utils/emailService');
+      
+      const clientName = clientDetails.child_name || 
+                        `${clientDetails.first_name} ${clientDetails.last_name}`.trim();
+      const psychologistName = `${psychologistDetails.first_name} ${psychologistDetails.last_name}`.trim();
+
+      await emailService.sendRescheduleNotification({
+        clientEmail: clientDetails.user?.email,
+        psychologistEmail: psychologistDetails.email,
+        clientName,
+        psychologistName,
+        sessionId: updatedSession.id,
+        originalDate: originalSession.scheduled_date,
+        originalTime: originalSession.scheduled_time,
+        newDate: updatedSession.scheduled_date,
+        newTime: updatedSession.scheduled_time,
+        meetLink: updatedSession.google_meet_link
+      });
+
+      console.log('✅ Reschedule emails sent successfully');
+    }
+  } catch (error) {
+    console.error('Error sending reschedule emails:', error);
+    // Don't throw - let the reschedule complete even if email fails
+  }
+};
+
+// Get single session with summary (visible to client)
+const getSession = async (req, res) => {
+  try {
+    const clientId = req.user.id;
+    const { sessionId } = req.params;
+
+    console.log(`📋 Getting session ${sessionId} for client ${clientId}`);
+
+    // Get session with psychologist details, but exclude session_notes
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select(`
+        id,
+        scheduled_date,
+        scheduled_time,
+        status,
+        session_summary,
+        feedback,
+        price,
+        created_at,
+        updated_at,
+        psychologist:psychologists(
+          id,
+          first_name,
+          last_name,
+          area_of_expertise
+        )
+      `)
+      .eq('id', sessionId)
+      .eq('client_id', clientId)
+      .single();
+
+    if (sessionError) {
+      console.error('Error fetching session:', sessionError);
+      return res.status(404).json(
+        errorResponse('Session not found')
+      );
+    }
+
+    console.log(`✅ Session ${sessionId} retrieved successfully for client ${clientId}`);
+    res.json(
+      successResponse(session)
+    );
+
+  } catch (error) {
+    console.error('Error getting session:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching session')
+    );
+  }
+};
+
+// Get psychologist packages for client viewing
+const getPsychologistPackages = async (req, res) => {
+  try {
+    const { psychologistId } = req.params;
+    console.log(`📦 Getting packages for psychologist ${psychologistId}`);
+
+    // Get packages for this psychologist
+    const { data: packages, error: packagesError } = await supabase
+      .from('packages')
+      .select('*')
+      .eq('psychologist_id', psychologistId)
+      .order('session_count', { ascending: true });
+
+    if (packagesError) {
+      console.error('Error fetching packages:', packagesError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch packages')
+      );
+    }
+
+    console.log(`✅ Found ${packages?.length || 0} packages for psychologist ${psychologistId}`);
+    res.json(
+      successResponse({ packages: packages || [] })
+    );
+
+  } catch (error) {
+    console.error('Error getting psychologist packages:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching packages')
+    );
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
   getSessions,
+  getSession,
   bookSession,
   cancelSession,
   getAvailablePsychologists,
-  requestReschedule
+  getPsychologistPackages,
+  requestReschedule,
+  rescheduleSession
 };

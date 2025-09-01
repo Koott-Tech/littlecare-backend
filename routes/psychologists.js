@@ -19,6 +19,7 @@ router.put('/profile', validatePsychologistProfile, psychologistController.updat
 // Session management
 router.get('/sessions', psychologistController.getSessions);
 router.put('/sessions/:sessionId', psychologistController.updateSession);
+router.post('/sessions/:sessionId/complete', psychologistController.completeSession);
 router.post('/sessions/:sessionId/reschedule-response', psychologistController.respondToRescheduleRequest);
 
 // Availability management

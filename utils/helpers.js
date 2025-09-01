@@ -29,7 +29,7 @@ const generateUUID = () => {
 
 // Format date for database
 const formatDate = (date) => {
-  // Use Indian Standard Time (IST) - UTC+5:30
+  // Use local date directly without timezone conversion
   const inputDate = new Date(date);
   return inputDate.toISOString().split('T')[0];
 };

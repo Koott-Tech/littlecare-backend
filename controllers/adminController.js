@@ -11,10 +11,9 @@ const getAvailabilityDatesForDay = (dayName, numOccurrences = 1) => {
   const dayIndex = days.indexOf(dayName);
   if (dayIndex === -1) return [];
   
-  // Use Indian Standard Time (IST) - UTC+5:30
+  // Use local date directly without timezone conversion
   const today = new Date();
-  const istToday = new Date(today.getTime() + (5.5 * 60 * 60 * 1000)); // Add 5.5 hours for IST
-  const currentDay = istToday.getDay();
+  const currentDay = today.getDay();
   let daysUntilNext = dayIndex - currentDay;
   
   // If today is the target day, start from today
@@ -27,8 +26,8 @@ const getAvailabilityDatesForDay = (dayName, numOccurrences = 1) => {
   
   const dates = [];
   for (let occurrence = 0; occurrence < numOccurrences; occurrence++) {
-    const date = new Date(istToday);
-    date.setDate(istToday.getDate() + daysUntilNext + (occurrence * 7));
+    const date = new Date(today);
+    date.setDate(today.getDate() + daysUntilNext + (occurrence * 7));
     dates.push(date);
   }
   
@@ -763,7 +762,21 @@ const createPsychologist = async (req, res) => {
   try {
     console.log('=== createPsychologist function called ===');
     console.log('Request body:', req.body);
-    const { email, password, first_name, last_name, phone, ug_college, pg_college, phd_college, area_of_expertise, description, experience_years, availability } = req.body;
+    const { 
+      email, 
+      password, 
+      first_name, 
+      last_name, 
+      phone, 
+      ug_college, 
+      pg_college, 
+      phd_college, 
+      area_of_expertise, 
+      description, 
+      experience_years, 
+      availability,
+      packages // New field for dynamic packages
+    } = req.body;
 
     // Check if psychologist already exists with this email
     const { data: existingPsychologist } = await supabase
@@ -807,6 +820,54 @@ const createPsychologist = async (req, res) => {
       );
     }
 
+    // Always create individual session option first
+    const individualSession = {
+      psychologist_id: psychologist.id,
+      package_type: 'individual',
+      name: 'Single Session',
+      description: 'One therapy session',
+      session_count: 1,
+      price: 100, // Default price, can be customized
+      discount_percentage: 0
+    };
+
+    // Create dynamic packages for the psychologist based on admin selection
+    if (packages && Array.isArray(packages) && packages.length > 0) {
+      try {
+        console.log('📦 Creating custom packages:', packages);
+        
+        const packageData = packages.map(pkg => ({
+          psychologist_id: psychologist.id,
+          package_type: pkg.package_type || `package_${pkg.session_count}`,
+          name: pkg.name || `Package of ${pkg.session_count} Sessions`,
+          description: pkg.description || `${pkg.session_count} therapy sessions${pkg.discount_percentage > 0 ? ` with ${pkg.discount_percentage}% discount` : ''}`,
+          session_count: pkg.session_count,
+          price: pkg.price,
+          discount_percentage: pkg.discount_percentage || 0
+        }));
+
+        const { error: packagesError } = await supabase
+          .from('packages')
+          .insert(packageData);
+
+        if (packagesError) {
+          console.error('Custom packages creation error:', packagesError);
+          // Continue without packages if it fails
+        } else {
+          console.log('✅ Custom packages created successfully');
+          console.log('   - Packages created:', packageData.length);
+          packageData.forEach(pkg => {
+            console.log(`     • ${pkg.name}: ${pkg.session_count} sessions, $${pkg.price}`);
+          });
+        }
+      } catch (packagesError) {
+        console.error('Exception while creating custom packages:', packagesError);
+        // Continue without packages if it fails
+      }
+    } else {
+      console.log('📦 No packages specified - psychologist will have no packages initially');
+    }
+
     // Handle availability if provided
     if (availability && availability.length > 0) {
       try {
@@ -817,10 +878,15 @@ const createPsychologist = async (req, res) => {
           dates.forEach(date => {
             // Only save if there are actual time slots
             if (item.slots && item.slots.length > 0) {
-              // Use IST date (no timezone conversion needed since we're already in IST)
+              // Use local date formatting to avoid timezone conversion issues
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const day = String(date.getDate()).padStart(2, '0');
+              const dateString = `${year}-${month}-${day}`;
+              
               availabilityRecords.push({
                 psychologist_id: psychologist.id,
-                date: date.toISOString().split('T')[0], // Convert to YYYY-MM-DD format
+                date: dateString, // Use local date formatting
                 time_slots: item.slots // Direct array of time strings as expected by validation
               });
             }
@@ -1372,6 +1438,92 @@ const getRecentActivities = async (req, res) => {
   }
 };
 
+// Create packages for existing psychologist (admin only)
+const createPsychologistPackages = async (req, res) => {
+  try {
+    const { psychologistId } = req.params;
+    const { packages } = req.body;
+
+    console.log('=== createPsychologistPackages function called ===');
+    console.log('Psychologist ID:', psychologistId);
+    console.log('Packages:', packages);
+
+    // Validate packages
+    if (!packages || !Array.isArray(packages) || packages.length === 0) {
+      return res.status(400).json(
+        errorResponse('Packages array is required and must not be empty')
+      );
+    }
+
+    // Check if psychologist exists
+    const { data: psychologist, error: psychologistError } = await supabase
+      .from('psychologists')
+      .select('id, first_name, last_name')
+      .eq('id', psychologistId)
+      .single();
+
+    if (psychologistError || !psychologist) {
+      return res.status(404).json(
+        errorResponse('Psychologist not found')
+      );
+    }
+
+    // Validate each package
+    for (const pkg of packages) {
+      if (!pkg.session_count || !pkg.price || pkg.session_count < 1 || pkg.price <= 0) {
+        return res.status(400).json(
+          errorResponse(`Invalid package: session_count must be > 0, price must be > 0`)
+        );
+      }
+    }
+
+    // Always include individual session option
+    const individualSession = {
+      psychologist_id: psychologistId,
+      package_type: 'individual',
+      name: 'Single Session',
+      description: 'One therapy session',
+      session_count: 1,
+      price: 100, // Default price
+      discount_percentage: 0
+    };
+
+    // Create packages
+    const packageData = [individualSession, ...packages.map(pkg => ({
+      psychologist_id: psychologistId,
+      package_type: pkg.package_type || `package_${pkg.session_count}`,
+      name: pkg.name || `Package of ${pkg.session_count} Sessions`,
+      description: pkg.description || `${pkg.session_count} therapy sessions${pkg.discount_percentage > 0 ? ` with ${pkg.discount_percentage}% discount` : ''}`,
+      session_count: pkg.session_count,
+      price: pkg.price,
+      discount_percentage: pkg.discount_percentage || 0
+    }))];
+
+    const { data: createdPackages, error: packagesError } = await supabase
+      .from('packages')
+      .insert(packageData)
+      .select('*');
+
+    if (packagesError) {
+      console.error('Packages creation error:', packagesError);
+      return res.status(500).json(
+        errorResponse('Failed to create packages')
+      );
+    }
+
+    console.log('✅ Packages created successfully for psychologist:', psychologist.first_name, psychologist.last_name);
+    res.status(201).json(
+      successResponse(createdPackages, 'Packages created successfully')
+    );
+
+  } catch (error) {
+    console.error('Create psychologist packages error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while creating packages')
+    );
+  }
+};
+
 module.exports = {
   getAllUsers,
   getAllPsychologists,
@@ -1383,6 +1535,7 @@ module.exports = {
   createPsychologist,
   updatePsychologist,
   deletePsychologist,
+  createPsychologistPackages,
   createUser,
   updateUser,
   deleteUser,

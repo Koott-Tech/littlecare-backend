@@ -33,6 +33,9 @@ router.post('/psychologists', adminController.createPsychologist);
 router.put('/psychologists/:psychologistId', adminController.updatePsychologist);
 router.delete('/psychologists/:psychologistId', adminController.deletePsychologist);
 
+// Package management for psychologists
+router.post('/psychologists/:psychologistId/packages', adminController.createPsychologistPackages);
+
 // User management
 router.post('/users', adminController.createUser);
 router.put('/users/:userId', adminController.updateUser);

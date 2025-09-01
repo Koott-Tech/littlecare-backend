@@ -30,9 +30,15 @@ function generateCalendarInvite(sessionData) {
 
   // Format dates for iCalendar in IST timezone (YYYYMMDDTHHMMSS)
   const formatICalDateIST = (date) => {
-    // Convert to IST and format without Z (no UTC indicator)
-    const istDate = new Date(date.getTime());
-    return istDate.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z/, '');
+    // Format the date in IST timezone without converting to UTC
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    
+    return `${year}${month}${day}T${hours}${minutes}${seconds}`;
   };
 
   const startDate = formatICalDateIST(sessionDateTime);

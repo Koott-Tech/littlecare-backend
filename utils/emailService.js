@@ -67,6 +67,8 @@ class EmailService {
       console.log('📅 Email formatting (IST):');
       console.log('   - Original time:', `${finalSessionDate}T${finalSessionTime}`);
       console.log('   - Session DateTime:', sessionDateTime.toISOString());
+      console.log('   - Session DateTime (local):', sessionDateTime.toString());
+      console.log('   - Session DateTime (IST):', sessionDateTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
       console.log('   - Formatted Date:', formattedDate);
       console.log('   - Formatted Time:', formattedTime);
 
