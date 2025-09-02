@@ -175,23 +175,35 @@ app.get('/api/public/psychologists', async (req, res) => {
       throw new Error('Failed to fetch psychologists');
     }
 
+    // Individual price is stored directly in the psychologist record
+    // No need to fetch from packages table since it doesn't exist
+
     // Format the response
-    const formattedPsychologists = psychologists.map(psych => ({
-      id: psych.id,
-      name: `${psych.first_name} ${psych.last_name}`.trim(),
-      first_name: psych.first_name,
-      last_name: psych.last_name,
-      email: psych.email,
-      phone: psych.phone || 'N/A',
-      area_of_expertise: psych.area_of_expertise || [],
-      experience_years: psych.experience_years || 0,
-      ug_college: psych.ug_college || 'N/A',
-      pg_college: psych.pg_college || 'N/A',
-      phd_college: psych.phd_college || 'N/A',
-      description: psych.description || 'Professional psychologist dedicated to helping clients achieve mental wellness.',
-      profile_picture_url: null,
-      cover_image_url: psych.cover_image_url
-    }));
+
+    // Format the response
+    const formattedPsychologists = psychologists.map(psych => {
+      // Try to extract price from description (handle both integer and decimal prices)
+      const priceMatch = psych.description?.match(/Individual Session Price: \$(\d+(?:\.\d+)?)/);
+      const extractedPrice = priceMatch ? parseFloat(priceMatch[1]) : null;
+      
+      return {
+        id: psych.id,
+        name: `${psych.first_name} ${psych.last_name}`.trim(),
+        first_name: psych.first_name,
+        last_name: psych.last_name,
+        email: psych.email,
+        phone: psych.phone || 'N/A',
+        area_of_expertise: psych.area_of_expertise || [],
+        experience_years: psych.experience_years || 0,
+        ug_college: psych.ug_college || 'N/A',
+        pg_college: psych.pg_college || 'N/A',
+        phd_college: psych.phd_college || 'N/A',
+        description: psych.description || 'Professional psychologist dedicated to helping clients achieve mental wellness.',
+        profile_picture_url: null,
+        cover_image_url: psych.cover_image_url,
+        price: extractedPrice
+      };
+    });
 
     res.json({
       success: true,
@@ -204,6 +216,45 @@ app.get('/api/public/psychologists', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch psychologists',
+      message: error.message
+    });
+  }
+});
+
+// Public psychologist packages endpoint
+app.get('/api/public/psychologists/:psychologistId/packages', async (req, res) => {
+  try {
+    const supabase = require('./config/supabase');
+    const { psychologistId } = req.params;
+    console.log(`📦 Getting packages for psychologist ${psychologistId}`);
+
+    // Get packages for this psychologist
+    const { data: packages, error: packagesError } = await supabase
+      .from('packages')
+      .select('*')
+      .eq('psychologist_id', psychologistId)
+      .order('session_count', { ascending: true });
+
+    if (packagesError) {
+      console.error('Error fetching packages:', packagesError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch packages',
+        message: packagesError.message
+      });
+    }
+
+    console.log(`✅ Found ${packages?.length || 0} packages for psychologist ${psychologistId}`);
+    res.json({
+      success: true,
+      data: { packages: packages || [] }
+    });
+
+  } catch (error) {
+    console.error('Error getting psychologist packages:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching packages',
       message: error.message
     });
   }
