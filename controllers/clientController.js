@@ -1046,16 +1046,17 @@ const getPsychologistPackages = async (req, res) => {
     const { psychologistId } = req.params;
     console.log(`📦 Getting packages for psychologist ${psychologistId}`);
 
-    const { data: packages, error } = await supabase
+    // Get packages for this psychologist
+    const { data: packages, error: packagesError } = await supabase
       .from('packages')
       .select('*')
       .eq('psychologist_id', psychologistId)
-      .order('package_type', { ascending: true });
+      .order('session_count', { ascending: true });
 
-    if (error) {
-      console.error('Error fetching psychologist packages:', error);
+    if (packagesError) {
+      console.error('Error fetching packages:', packagesError);
       return res.status(500).json(
-        errorResponse('Failed to fetch psychologist packages')
+        errorResponse('Failed to fetch packages')
       );
     }
 
@@ -1067,325 +1068,7 @@ const getPsychologistPackages = async (req, res) => {
   } catch (error) {
     console.error('Error getting psychologist packages:', error);
     res.status(500).json(
-      errorResponse('Internal server error while fetching psychologist packages')
-    );
-  }
-};
-
-// Book remaining session from package
-const bookRemainingSession = async (req, res) => {
-  try {
-    console.log('🚀 Starting remaining session booking process...');
-    const { psychologist_id, scheduled_date, scheduled_time, package_id } = req.body;
-
-    // Validate required fields
-    if (!psychologist_id || !scheduled_date || !scheduled_time || !package_id) {
-      return res.status(400).json(
-        errorResponse('Missing required fields: psychologist_id, scheduled_date, scheduled_time, package_id')
-      );
-    }
-
-    // Get client_id from authenticated user
-    const userId = req.user.id;
-    const userRole = req.user.role;
-
-    // Check if user is a client
-    if (userRole !== 'client') {
-      return res.status(403).json(
-        errorResponse('Only clients can book sessions')
-      );
-    }
-
-    // Get client profile from clients table
-    const { data: client, error: clientError } = await supabase
-      .from('clients')
-      .select('id')
-      .eq('user_id', userId)
-      .single();
-
-    if (clientError || !client) {
-      console.error('Client profile not found:', clientError);
-      return res.status(404).json(
-        errorResponse('Client profile not found. Please complete your profile first.')
-      );
-    }
-
-    const clientId = client.id;
-
-    console.log('🔍 Step 1: Client validation');
-    console.log('   - Client ID:', clientId);
-    console.log('   - User ID:', userId);
-    console.log('   - User Role:', userRole);
-
-    // Step 2: Validate package and check remaining sessions
-    console.log('🔍 Step 2: Package validation and remaining sessions check');
-    
-    const { data: clientPackage, error: packageError } = await supabase
-      .from('client_packages')
-      .select('*')
-      .eq('id', package_id)
-      .eq('client_id', clientId)
-      .eq('psychologist_id', psychologist_id)
-      .eq('status', 'active')
-      .single();
-
-    if (packageError || !clientPackage) {
-      console.log('❌ Client package validation failed');
-      return res.status(400).json(
-        errorResponse('Package not found or invalid for this client and psychologist')
-      );
-    }
-
-    if (clientPackage.remaining_sessions <= 0) {
-      console.log('❌ No remaining sessions in package');
-      return res.status(400).json(
-        errorResponse('No remaining sessions in this package')
-      );
-    }
-
-    console.log('✅ Package validation passed');
-    console.log('   - Remaining sessions:', clientPackage.remaining_sessions);
-
-    // Step 3: Check if the time slot is available
-    console.log('🔍 Step 3: Checking time slot availability...');
-    const isAvailable = await availabilityService.isTimeSlotAvailable(
-      psychologist_id, 
-      scheduled_date, 
-      scheduled_time
-    );
-
-    if (!isAvailable) {
-      return res.status(400).json(
-        errorResponse('This time slot is not available. Please select another time.')
-      );
-    }
-
-    console.log('✅ Time slot is available');
-
-    // Step 4: Get client and psychologist details for Google Calendar
-    console.log('🔍 Step 4: Fetching user details for Google Calendar...');
-    const { data: clientDetails, error: clientDetailsError } = await supabase
-      .from('clients')
-      .select(`
-        first_name, 
-        last_name, 
-        child_name,
-        user:users(email)
-      `)
-      .eq('id', clientId)
-      .single();
-
-    if (clientDetailsError || !clientDetails) {
-      console.error('Error fetching client details:', clientDetailsError);
-      return res.status(500).json(
-        errorResponse('Failed to fetch client details')
-      );
-    }
-
-    const { data: psychologistDetails, error: psychologistDetailsError } = await supabase
-      .from('psychologists')
-      .select('first_name, last_name, email')
-      .eq('id', psychologist_id)
-      .single();
-
-    if (psychologistDetailsError || !psychologistDetails) {
-      console.error('Error fetching psychologist details:', psychologistDetailsError);
-      return res.status(500).json(
-        errorResponse('Failed to fetch psychologist details')
-      );
-    }
-
-    console.log('✅ User details fetched successfully');
-
-    // Step 5: Create Google Calendar event
-    console.log('🔍 Step 5: Creating Google Calendar event...');
-    let meetData = null;
-    try {
-      meetData = await createMeetEvent({
-        summary: `Therapy Session - ${clientDetails?.child_name || 'Client'} with ${psychologistDetails?.first_name || 'Psychologist'}`,
-        description: `Therapy session between ${clientDetails?.child_name || 'Client'} and ${psychologistDetails?.first_name || 'Psychologist'}`,
-        startDate: scheduled_date,
-        startTime: scheduled_time,
-        endTime: addMinutesToTime(scheduled_time, 50), // 50-minute session
-        attendees: [
-          { email: clientDetails.user?.email || 'client@placeholder.com' },
-          { email: psychologistDetails?.email || 'psychologist@placeholder.com' }
-        ]
-      });
-
-      console.log('✅ Google Calendar event created successfully');
-      console.log('   - Meet Link:', meetData.meetLink);
-      console.log('   - Event ID:', meetData.eventId);
-      console.log('   - Calendar Link:', meetData.calendarLink);
-    } catch (meetError) {
-      console.error('❌ Google Calendar event creation failed:', meetError);
-      meetData = {
-        meetLink: null,
-        eventId: null,
-        calendarLink: null
-      };
-    }
-
-    // Step 6: Create session record
-    console.log('🔍 Step 6: Creating session record...');
-    const sessionData = {
-      client_id: clientId,
-      psychologist_id,
-      scheduled_date: formatDate(scheduled_date),
-      scheduled_time: formatTime(scheduled_time),
-      status: 'booked',
-      google_calendar_event_id: meetData.eventId,
-      google_meet_link: meetData.meetLink,
-      google_calendar_link: meetData.calendarLink,
-      package_id: package_id,
-      price: 0 // No additional charge for remaining sessions
-    };
-
-    const { data: session, error: sessionError } = await supabase
-      .from('sessions')
-      .insert([sessionData])
-      .select('*')
-      .single();
-
-    if (sessionError) {
-      console.error('❌ Session creation failed:', sessionError);
-      return res.status(500).json(
-        errorResponse('Failed to create session')
-      );
-    }
-
-    console.log('✅ Session record created successfully');
-
-    // Step 7: Update client package to reduce remaining sessions
-    console.log('🔍 Step 7: Updating client package...');
-    const newRemainingSessions = clientPackage.remaining_sessions - 1;
-    const packageStatus = newRemainingSessions === 0 ? 'completed' : 'active';
-
-    const { error: updatePackageError } = await supabase
-      .from('client_packages')
-      .update({
-        remaining_sessions: newRemainingSessions,
-        status: packageStatus,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', package_id);
-
-    if (updatePackageError) {
-      console.error('❌ Package update failed:', updatePackageError);
-      // Continue even if package update fails
-    } else {
-      console.log('✅ Package updated successfully');
-      console.log('   - New remaining sessions:', newRemainingSessions);
-      console.log('   - Package status:', packageStatus);
-    }
-
-    // Step 8: Send email notifications
-    console.log('🔍 Step 8: Sending email notifications...');
-    try {
-      const emailService = require('../utils/emailService');
-      
-      const clientName = clientDetails.child_name || 
-                        `${clientDetails.first_name} ${clientDetails.last_name}`.trim();
-      const psychologistName = `${psychologistDetails.first_name} ${psychologistDetails.last_name}`.trim();
-
-      await emailService.sendSessionConfirmation({
-        clientEmail: clientDetails.user?.email || 'client@placeholder.com',
-        psychologistEmail: psychologistDetails?.email || 'psychologist@placeholder.com',
-        clientName,
-        psychologistName,
-        sessionId: session.id,
-        scheduledDate: scheduled_date,
-        scheduledTime: scheduled_time,
-        meetLink: meetData.meetLink,
-        price: 0
-      });
-
-      console.log('✅ Email notifications sent successfully');
-    } catch (emailError) {
-      console.error('❌ Error sending email notifications:', emailError);
-    }
-
-    console.log('✅ Remaining session booking completed successfully');
-    res.status(201).json(
-      successResponse({
-        session,
-        meetLink: meetData.meetLink,
-        calendarLink: meetData.calendarLink,
-        package: {
-          remaining_sessions: newRemainingSessions,
-          status: packageStatus
-        }
-      }, 'Remaining session booked successfully')
-    );
-
-  } catch (error) {
-    console.error('❌ Remaining session booking error:', error);
-    res.status(500).json(
-      errorResponse('Internal server error while booking remaining session')
-    );
-  }
-};
-
-// Get client packages
-const getClientPackages = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    console.log(`📦 Getting client packages for user ${userId}`);
-
-    // Get client ID from clients table
-    const { data: client, error: clientError } = await supabase
-      .from('clients')
-      .select('id')
-      .eq('user_id', userId)
-      .single();
-
-    if (clientError || !client) {
-      console.error('Client profile not found:', clientError);
-      return res.status(404).json(
-        errorResponse('Client profile not found. Please complete your profile first.')
-      );
-    }
-
-    const clientId = client.id;
-
-    const { data: clientPackages, error: clientPackagesError } = await supabase
-      .from('client_packages')
-      .select(`
-        id,
-        package_id,
-        package_type,
-        total_sessions,
-        remaining_sessions,
-        total_amount,
-        amount_paid,
-        status,
-        purchased_at,
-        first_session_id,
-        psychologist:psychologists(
-          id,
-          first_name,
-          last_name
-        )
-      `)
-      .eq('client_id', clientId)
-      .order('purchased_at', { ascending: false });
-
-    if (clientPackagesError) {
-      console.error('Error fetching client packages:', clientPackagesError);
-      return res.status(500).json(
-        errorResponse('Failed to fetch client packages')
-      );
-    }
-
-    console.log(`✅ Found ${clientPackages?.length || 0} client packages for user ${userId}`);
-    res.json(
-      successResponse({ clientPackages: clientPackages || [] })
-    );
-
-  } catch (error) {
-    console.error('Error getting client packages:', error);
-    res.status(500).json(
-      errorResponse('Internal server error while fetching client packages')
+      errorResponse('Internal server error while fetching packages')
     );
   }
 };
@@ -1496,6 +1179,286 @@ const submitSessionFeedback = async (req, res) => {
   }
 };
 
+// Get client packages
+const getClientPackages = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get client ID
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (clientError || !client) {
+      return res.status(404).json(
+        errorResponse('Client profile not found')
+      );
+    }
+
+    const clientId = client.id;
+
+    // Get client packages with package details
+    const { data: clientPackages, error: packagesError } = await supabase
+      .from('client_packages')
+      .select(`
+        *,
+        package:packages(
+          id,
+          package_type,
+          description,
+          session_count,
+          price
+        ),
+        psychologist:psychologists(
+          id,
+          first_name,
+          last_name,
+          area_of_expertise
+        )
+      `)
+      .eq('client_id', clientId)
+      .order('purchased_at', { ascending: false });
+
+    if (packagesError) {
+      console.error('Error fetching client packages:', packagesError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch client packages')
+      );
+    }
+
+    res.json(
+      successResponse({
+        packages: clientPackages || []
+      })
+    );
+
+  } catch (error) {
+    console.error('Error getting client packages:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching client packages')
+    );
+  }
+};
+
+// Book remaining session from package
+const bookRemainingSession = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { package_id, scheduled_date, scheduled_time } = req.body;
+
+    console.log('🚀 Starting remaining session booking process...');
+    console.log('   - Package ID:', package_id);
+    console.log('   - Scheduled Date:', scheduled_date);
+    console.log('   - Scheduled Time:', scheduled_time);
+
+    // Validate required fields
+    if (!package_id || !scheduled_date || !scheduled_time) {
+      return res.status(400).json(
+        errorResponse('Missing required fields: package_id, scheduled_date, scheduled_time')
+      );
+    }
+
+    // Get client ID
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (clientError || !client) {
+      return res.status(404).json(
+        errorResponse('Client profile not found')
+      );
+    }
+
+    const clientId = client.id;
+
+    // Get client package and verify ownership
+    const { data: clientPackage, error: packageError } = await supabase
+      .from('client_packages')
+      .select(`
+        *,
+        package:packages(
+          id,
+          package_type,
+          description,
+          session_count,
+          price,
+          psychologist_id
+        )
+      `)
+      .eq('id', package_id)
+      .eq('client_id', clientId)
+      .single();
+
+    if (packageError || !clientPackage) {
+      return res.status(404).json(
+        errorResponse('Package not found or access denied')
+      );
+    }
+
+    // Check if package has remaining sessions
+    if (clientPackage.remaining_sessions <= 0) {
+      return res.status(400).json(
+        errorResponse('No remaining sessions in this package')
+      );
+    }
+
+    const psychologistId = clientPackage.package.psychologist_id;
+
+    // Check if the time slot is available
+    const isAvailable = await availabilityService.isTimeSlotAvailable(
+      psychologistId, 
+      scheduled_date, 
+      scheduled_time
+    );
+
+    if (!isAvailable) {
+      return res.status(400).json(
+        errorResponse('This time slot is not available. Please select another time.')
+      );
+    }
+
+    // Get client and psychologist details for Google Calendar
+    const { data: clientDetails, error: clientDetailsError } = await supabase
+      .from('clients')
+      .select(`
+        first_name, 
+        last_name, 
+        child_name,
+        user:users(email)
+      `)
+      .eq('id', clientId)
+      .single();
+
+    if (clientDetailsError || !clientDetails) {
+      console.error('Error fetching client details:', clientDetailsError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch client details')
+      );
+    }
+
+    const { data: psychologistDetails, error: psychologistDetailsError } = await supabase
+      .from('psychologists')
+      .select('first_name, last_name, email')
+      .eq('id', psychologistId)
+      .single();
+
+    if (psychologistDetailsError || !psychologistDetails) {
+      console.error('Error fetching psychologist details:', psychologistDetailsError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch psychologist details')
+      );
+    }
+
+    // Create Google Calendar event
+    let meetData = null;
+    try {
+      meetData = await createMeetEvent({
+        summary: `Therapy Session - ${clientDetails?.child_name || 'Client'} with ${psychologistDetails?.first_name || 'Psychologist'}`,
+        description: `Therapy session between ${clientDetails?.child_name || 'Client'} and ${psychologistDetails?.first_name || 'Psychologist'}`,
+        startDate: scheduled_date,
+        startTime: scheduled_time,
+        endTime: addMinutesToTime(scheduled_time, 50), // 50-minute session
+        attendees: [
+          { email: clientDetails.user?.email || 'client@placeholder.com' },
+          { email: psychologistDetails?.email || 'psychologist@placeholder.com' }
+        ]
+      });
+    } catch (meetError) {
+      console.error('Google Calendar event creation failed:', meetError);
+      meetData = {
+        meetLink: null,
+        eventId: null,
+        calendarLink: null
+      };
+    }
+
+    // Create session record
+    const sessionData = {
+      client_id: clientId,
+      psychologist_id: psychologistId,
+      package_id: clientPackage.package.id,
+      scheduled_date: formatDate(scheduled_date),
+      scheduled_time: formatTime(scheduled_time),
+      status: 'booked',
+      google_calendar_event_id: meetData.eventId,
+      google_meet_link: meetData.meetLink,
+      google_calendar_link: meetData.calendarLink,
+      price: 0 // Free since it's from a package
+    };
+
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .insert([sessionData])
+      .select('*')
+      .single();
+
+    if (sessionError) {
+      console.error('Session creation failed:', sessionError);
+      return res.status(500).json(
+        errorResponse('Failed to create session')
+      );
+    }
+
+    // Update remaining sessions in client package
+    const { error: updateError } = await supabase
+      .from('client_packages')
+      .update({
+        remaining_sessions: clientPackage.remaining_sessions - 1,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', package_id);
+
+    if (updateError) {
+      console.error('Failed to update remaining sessions:', updateError);
+      // Continue even if update fails
+    }
+
+    // Send email notifications
+    try {
+      const emailService = require('../utils/emailService');
+      
+      const clientName = clientDetails.child_name || 
+                        `${clientDetails.first_name} ${clientDetails.last_name}`.trim();
+      const psychologistName = `${psychologistDetails.first_name} ${psychologistDetails.last_name}`.trim();
+
+      await emailService.sendSessionConfirmation({
+        clientEmail: clientDetails.user?.email || 'client@placeholder.com',
+        psychologistEmail: psychologistDetails?.email || 'psychologist@placeholder.com',
+        clientName,
+        psychologistName,
+        sessionId: session.id,
+        scheduledDate: scheduled_date,
+        scheduledTime: scheduled_time,
+        meetLink: meetData.meetLink,
+        price: 0
+      });
+    } catch (emailError) {
+      console.error('Error sending email notifications:', emailError);
+      // Continue even if email fails
+    }
+
+    console.log('✅ Remaining session booked successfully');
+    res.status(201).json(
+      successResponse({
+        session,
+        meetLink: meetData.meetLink,
+        calendarLink: meetData.calendarLink,
+        remaining_sessions: clientPackage.remaining_sessions - 1
+      }, 'Session booked successfully from package')
+    );
+
+  } catch (error) {
+    console.error('Error booking remaining session:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while booking session')
+    );
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -1508,6 +1471,6 @@ module.exports = {
   requestReschedule,
   rescheduleSession,
   submitSessionFeedback,
-  bookRemainingSession,
-  getClientPackages
+  getClientPackages,
+  bookRemainingSession
 };

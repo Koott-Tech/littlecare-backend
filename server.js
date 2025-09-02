@@ -14,6 +14,7 @@ const availabilityRoutes = require('./routes/availability');
 const oauthRoutes = require('./routes/oauth');
 const meetRoutes = require('./routes/meet');
 const notificationRoutes = require('./routes/notifications');
+const messageRoutes = require('./routes/messages');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -708,6 +709,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/availability', availabilityRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/messages', messageRoutes);
 app.use('/api', oauthRoutes);
 app.use('/api', meetRoutes);
 
