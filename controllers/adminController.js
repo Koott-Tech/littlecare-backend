@@ -988,12 +988,13 @@ const updatePsychologist = async (req, res) => {
       try {
         // Store price in a custom field or handle it differently
         // For now, we'll store it in the description field as a temporary solution
-        const priceInfo = `Individual Session Price: $${price}`;
+        const priceInfo = `Individual Session Price: ₹${price}`;
         
         // Remove any existing price info from description
         let cleanDescription = psychologist.description || '';
-        cleanDescription = cleanDescription.replace(/\n\nIndividual Session Price: \$\d+(?:\.\d+)?(\n\nIndividual Session Price: \$\d+(?:\.\d+)?)*/g, '');
-        cleanDescription = cleanDescription.replace(/Individual Session Price: \$\d+(?:\.\d+)?/g, '');
+        // Remove both $ and ₹ variants
+        cleanDescription = cleanDescription.replace(/\n\nIndividual Session Price: [₹\$]\d+(?:\.\d+)?(\n\nIndividual Session Price: [₹\$]\d+(?:\.\d+)?)*/g, '');
+        cleanDescription = cleanDescription.replace(/Individual Session Price: [₹\$]\d+(?:\.\d+)?/g, '');
         cleanDescription = cleanDescription.replace(/\n\n+/g, '\n\n'); // Clean up multiple newlines
         
         const updatedDescription = cleanDescription.trim() 

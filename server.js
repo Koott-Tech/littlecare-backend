@@ -32,12 +32,10 @@ app.use(limiter);
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://kutikkal.vercel.app', 'https://kuttikal.vercel.app'] 
-    : ['http://localhost:3000', 'http://localhost:3001'],
+  origin: ['https://kutikkal.vercel.app', 'https://kuttikal.vercel.app', 'http://localhost:3000', 'http://localhost:3001'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept']
 }));
 
 // Body parsing middleware
@@ -182,9 +180,9 @@ app.get('/api/public/psychologists', async (req, res) => {
 
     // Format the response
     const formattedPsychologists = psychologists.map(psych => {
-      // Try to extract price from description (handle both integer and decimal prices)
-      const priceMatch = psych.description?.match(/Individual Session Price: \$(\d+(?:\.\d+)?)/);
-      const extractedPrice = priceMatch ? parseFloat(priceMatch[1]) : null;
+      // Try to extract price from description (support ₹ and $)
+      const priceMatch = psych.description?.match(/Individual Session Price: ([₹\$])(\d+(?:\.\d+)?)/);
+      const extractedPrice = priceMatch ? parseFloat(priceMatch[2]) : null;
       
       return {
         id: psych.id,
