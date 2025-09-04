@@ -695,30 +695,33 @@ app.get('/api/debug/sessions/:psychologist_id/:date', async (req, res) => {
   }
 });
 
-// TEMPORARY: Reset user password
-app.post('/api/debug/reset-password', async (req, res) => {
+// TEMPORARY: Debug client sessions
+app.get('/api/debug/client-sessions/:clientId', async (req, res) => {
   try {
     const supabase = require('./config/supabase');
-    const bcrypt = require('bcrypt');
-    const { email, newPassword } = req.body;
+    const { clientId } = req.params;
 
-    if (!email || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email and newPassword are required'
-      });
-    }
+    console.log('🔍 Debug - Checking sessions for client:', clientId);
 
-    // Hash the new password
-    const saltRounds = 12;
-    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-    // Update the user's password
-    const { data, error } = await supabase
-      .from('users')
-      .update({ password_hash: hashedPassword })
-      .eq('email', email)
-      .select('id, email, role');
+    // Get all sessions for this client
+    const { data: sessions, error } = await supabase
+      .from('sessions')
+      .select(`
+        id,
+        scheduled_date,
+        scheduled_time,
+        status,
+        payment_id,
+        payment:payments!sessions_payment_id_fkey(
+          id,
+          transaction_id,
+          amount,
+          status,
+          completed_at
+        )
+      `)
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false });
 
     if (error) {
       return res.status(500).json({
@@ -727,17 +730,15 @@ app.post('/api/debug/reset-password', async (req, res) => {
       });
     }
 
-    if (!data || data.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
-      });
-    }
+    console.log('🔍 Debug - Found sessions:', sessions);
 
     res.json({
       success: true,
-      message: 'Password updated successfully',
-      data: data[0]
+      data: {
+        clientId,
+        sessionsCount: sessions?.length || 0,
+        sessions: sessions
+      }
     });
   } catch (error) {
     res.status(500).json({

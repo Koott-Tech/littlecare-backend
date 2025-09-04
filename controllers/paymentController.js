@@ -8,6 +8,131 @@ const {
 const { createMeetEvent } = require('../utils/meetEventHelper');
 const emailService = require('../utils/emailService');
 
+// Generate and store PDF receipt in Supabase storage
+const generateAndStoreReceipt = async (sessionData, paymentData, clientData, psychologistData) => {
+  try {
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({
+      size: 'A4',
+      margin: 50
+    });
+
+    const chunks = [];
+    
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('end', async () => {
+      try {
+        const pdfBuffer = Buffer.concat(chunks);
+        console.log('✅ PDF generated successfully, size:', pdfBuffer.length, 'bytes');
+
+        // Generate unique filename
+        const receiptNumber = `RCP-${sessionData.id.toString().padStart(6, '0')}`;
+        const filename = `receipts/${receiptNumber}-${sessionData.id}.pdf`;
+
+        // Upload to Supabase storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('receipts')
+          .upload(filename, pdfBuffer, {
+            contentType: 'application/pdf',
+            cacheControl: '3600'
+          });
+
+        if (uploadError) {
+          console.error('❌ Error uploading receipt to storage:', uploadError);
+          return;
+        }
+
+        // Get public URL
+        const { data: urlData } = supabase.storage
+          .from('receipts')
+          .getPublicUrl(filename);
+
+        console.log('✅ Receipt uploaded successfully:', urlData.publicUrl);
+
+        // Store receipt metadata in database
+        const { error: receiptError } = await supabase
+          .from('receipts')
+          .insert({
+            session_id: sessionData.id,
+            payment_id: paymentData.id,
+            receipt_number: receiptNumber,
+            file_path: filename,
+            file_url: urlData.publicUrl,
+            file_size: pdfBuffer.length,
+            created_at: new Date().toISOString()
+          });
+
+        if (receiptError) {
+          console.error('❌ Error storing receipt metadata:', receiptError);
+        } else {
+          console.log('✅ Receipt metadata stored successfully');
+        }
+
+      } catch (error) {
+        console.error('❌ Error in PDF upload process:', error);
+      }
+    });
+
+    // Add company logo/header
+    doc.fontSize(24).font('Helvetica-Bold').text('Kuttikal', { align: 'center' });
+    doc.fontSize(12).font('Helvetica').text('Mental Health & Wellness Platform', { align: 'center' });
+    doc.moveDown();
+
+    // Add receipt title
+    doc.fontSize(18).font('Helvetica-Bold').text('PAYMENT RECEIPT', { align: 'center' });
+    doc.moveDown();
+
+    // Add receipt details
+    doc.fontSize(10).font('Helvetica');
+    
+    // Receipt number
+    doc.text(`Receipt Number: RCP-${sessionData.id.toString().padStart(6, '0')}`);
+    doc.text(`Date: ${new Date(paymentData.completed_at || new Date()).toLocaleDateString('en-IN')}`);
+    doc.text(`Time: ${new Date(paymentData.completed_at || new Date()).toLocaleTimeString('en-IN')}`);
+    doc.moveDown();
+
+    // Session details
+    doc.fontSize(12).font('Helvetica-Bold').text('Session Details:');
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Date: ${new Date(sessionData.scheduled_date).toLocaleDateString('en-IN')}`);
+    doc.text(`Time: ${sessionData.scheduled_time}`);
+    doc.text(`Status: ${sessionData.status}`);
+    doc.moveDown();
+
+    // Psychologist details
+    doc.fontSize(12).font('Helvetica-Bold').text('Therapist:');
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Name: ${psychologistData.first_name} ${psychologistData.last_name}`);
+    doc.text(`Email: ${psychologistData.email}`);
+    doc.text(`Phone: ${psychologistData.phone || 'N/A'}`);
+    doc.moveDown();
+
+    // Client details
+    doc.fontSize(12).font('Helvetica-Bold').text('Client:');
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Name: ${clientData.first_name} ${clientData.last_name}`);
+    doc.text(`Email: ${clientData.user?.email || 'N/A'}`);
+    doc.moveDown();
+
+    // Payment details
+    doc.fontSize(12).font('Helvetica-Bold').text('Payment Details:');
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Transaction ID: ${paymentData.transaction_id}`);
+    doc.text(`Amount: ₹${paymentData.amount}`);
+    doc.text(`Payment Date: ${new Date(paymentData.completed_at || new Date()).toLocaleDateString('en-IN')}`);
+    doc.moveDown();
+
+    // Footer
+    doc.fontSize(10).font('Helvetica').text('Thank you for choosing Kuttikal for your mental health needs.', { align: 'center' });
+    doc.text('For any queries, please contact our support team.', { align: 'center' });
+
+    doc.end();
+
+  } catch (error) {
+    console.error('❌ Error generating receipt PDF:', error);
+  }
+};
+
 // Create PayU payment order
 const createPaymentOrder = async (req, res) => {
   try {
@@ -174,7 +299,7 @@ const handlePaymentSuccess = async (req, res) => {
     }
 
     // Check if already processed
-    if (paymentRecord.status === 'completed') {
+    if (paymentRecord.status === 'success') {
       return res.json({
         success: true,
         message: 'Payment already processed'
@@ -338,6 +463,15 @@ const handlePaymentSuccess = async (req, res) => {
         message: 'Failed to update payment status'
       });
     }
+
+    // Generate and store PDF receipt in Supabase storage
+    console.log('📄 Generating and storing PDF receipt...');
+    await generateAndStoreReceipt(
+      session,
+      { ...paymentRecord, completed_at: new Date().toISOString() },
+      clientDetails,
+      psychologistDetails
+    );
 
     // If package booking, create client package record
     if (packageId && packageId !== 'individual') {

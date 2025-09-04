@@ -5,6 +5,7 @@ const { authenticateToken, requireClient } = require('../middleware/auth');
 const { 
   validateClientProfile 
 } = require('../utils/validation');
+const { getClientReceipts, downloadReceipt } = require('../controllers/receiptController');
 
 // All routes require authentication and client role
 router.use(authenticateToken);
@@ -35,5 +36,11 @@ router.post('/reserve-slot', clientController.reserveTimeSlot);
 
 // Get client packages
 router.get('/packages', clientController.getClientPackages);
+
+// Get all receipts for a client
+router.get('/receipts', getClientReceipts);
+
+// Download a specific receipt as PDF
+router.get('/receipts/:receiptId/download', downloadReceipt);
 
 module.exports = router;
