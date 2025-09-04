@@ -29,8 +29,8 @@ const generateAndStoreReceipt = async (sessionData, paymentData, clientData, psy
         const receiptNumber = `RCP-${sessionData.id.toString().padStart(6, '0')}`;
         const filename = `receipts/${receiptNumber}-${sessionData.id}.pdf`;
 
-        // Upload to Supabase storage
-        const { data: uploadData, error: uploadError } = await supabase.storage
+        // Upload to Supabase storage using admin client
+        const { data: uploadData, error: uploadError } = await supabase.supabaseAdmin.storage
           .from('receipts')
           .upload(filename, pdfBuffer, {
             contentType: 'application/pdf',
@@ -43,14 +43,14 @@ const generateAndStoreReceipt = async (sessionData, paymentData, clientData, psy
         }
 
         // Get public URL
-        const { data: urlData } = supabase.storage
+        const { data: urlData } = supabase.supabaseAdmin.storage
           .from('receipts')
           .getPublicUrl(filename);
 
         console.log('✅ Receipt uploaded successfully:', urlData.publicUrl);
 
-        // Store receipt metadata in database
-        const { error: receiptError } = await supabase
+        // Store receipt metadata in database using admin client
+        const { error: receiptError } = await supabase.supabaseAdmin
           .from('receipts')
           .insert({
             session_id: sessionData.id,

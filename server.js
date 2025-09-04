@@ -14,8 +14,11 @@ const availabilityRoutes = require('./routes/availability');
 const oauthRoutes = require('./routes/oauth');
 const meetRoutes = require('./routes/meet');
 const notificationRoutes = require('./routes/notifications');
+const clientNotificationRoutes = require('./routes/clientNotifications');
 const messageRoutes = require('./routes/messages');
 const paymentRoutes = require('./routes/payment');
+const freeAssessmentRoutes = require('./routes/freeAssessments');
+const freeAssessmentTimeslotRoutes = require('./routes/freeAssessmentTimeslots');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -760,8 +763,11 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/availability', availabilityRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/client-notifications', clientNotificationRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/free-assessments', freeAssessmentRoutes);
+app.use('/api/free-assessment-timeslots', freeAssessmentTimeslotRoutes);
 app.use('/api', oauthRoutes);
 app.use('/api', meetRoutes);
 

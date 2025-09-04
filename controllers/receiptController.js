@@ -8,20 +8,20 @@ const getClientReceipts = async (req, res) => {
     console.log('🔍 Fetching receipts for user:', userId);
 
     // Get client ID from clients table
-    const { data: client, error: clientError } = await supabase
+    const { data: clientData, error: clientDataError } = await supabase
       .from('clients')
       .select('id')
       .eq('user_id', userId)
       .single();
 
-    if (clientError || !client) {
+    if (clientDataError || !clientData) {
       console.log('📝 No client profile found, returning empty receipts');
       return res.json(
         successResponse([], 'No receipts found')
       );
     }
 
-    const clientId = client.id;
+    const clientId = clientData.id;
     console.log('🔍 Fetching receipts for client:', clientId);
 
     // Get receipts from receipts table with session and payment details
@@ -102,20 +102,20 @@ const downloadReceipt = async (req, res) => {
     const userId = req.user.id;
 
     // Get client ID from clients table
-    const { data: client, error: clientError } = await supabase
+    const { data: clientData, error: clientDataError } = await supabase
       .from('clients')
       .select('id')
       .eq('user_id', userId)
       .single();
 
-    if (clientError || !client) {
+    if (clientDataError || !clientData) {
       console.log('📝 No client profile found');
       return res.status(404).json(
         errorResponse('Client profile not found')
       );
     }
 
-    const clientId = client.id;
+    const clientId = clientData.id;
 
     // Get the receipt data from receipts table
     const { data: receipt, error } = await supabase

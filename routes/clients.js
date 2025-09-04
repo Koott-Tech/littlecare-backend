@@ -22,6 +22,7 @@ router.post('/book-session', clientController.bookSession);
 router.put('/sessions/:sessionId/cancel', clientController.cancelSession);
 router.post('/sessions/:sessionId/reschedule-request', clientController.requestReschedule);
 router.put('/sessions/:sessionId/reschedule', clientController.rescheduleSession);
+router.get('/sessions/:sessionId/free-assessment-availability', clientController.getFreeAssessmentAvailabilityForReschedule);
 router.post('/sessions/:sessionId/feedback', clientController.submitSessionFeedback);
 
 // Psychologist discovery

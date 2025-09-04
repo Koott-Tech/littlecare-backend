@@ -92,8 +92,7 @@ async function createEventWithMeet({
         ...(allowAttendees ? { visibility: 'public', guestsCanInviteOthers: true, guestsCanSeeOtherGuests: true, guestsCanModify: false, anyoneCanAddSelf: true } : {}),
         conferenceData: {
           createRequest: { 
-            requestId: crypto.randomUUID(), // Let Google choose the conference type
-            conferenceSolutionKey: { type: 'hangoutsMeet' }
+            requestId: crypto.randomUUID() // Let Google choose the conference type
           }
         },
         reminders: {
@@ -122,9 +121,17 @@ async function createEventWithMeet({
     // Check if Meet link is immediately available
     if (eventData.hangoutLink) {
       console.log('   🚀 Meet link immediately available:', eventData.hangoutLink);
+      return {
+        event: eventData,
+        meetLink: eventData.hangoutLink,
+        eventId: eventData.id,
+        calendarLink: `https://calendar.google.com/event?eid=${eventData.id}`
+      };
     }
     
-    return eventData;
+    // If no immediate link, wait for conference to be ready
+    console.log('📅 Meet link not immediately available, waiting...');
+    return await waitForConferenceReady(eventData.id);
     
   } catch (error) {
     console.error('❌ Error creating event with Meet:', error);
@@ -199,7 +206,6 @@ async function waitForConferenceReady(eventId, timeoutMs = 30000, intervalMs = 2
         // Fallback: If conference is still pending but we have the event, try to extract any available link
         if (attempts >= 10) { // After 20 seconds, try fallback
           console.log('   ⏰ Conference still pending after 20s, trying fallback extraction...');
-          console.log('   📊 Full event data for fallback:', JSON.stringify(data, null, 2));
           
           let meetLink = null;
           
@@ -219,14 +225,6 @@ async function waitForConferenceReady(eventId, timeoutMs = 30000, intervalMs = 2
               meetLink = meetEntry.uri;
               console.log('   🔗 Fallback Meet link from conferenceData:', meetLink);
             }
-          }
-          
-          // Generate a fallback Meet link if none found
-          if (!meetLink) {
-            // Use the calendar event ID to generate a Meet link pattern
-            const eventShortId = data.id.substring(0, 10);
-            meetLink = `https://meet.google.com/lookup/${eventShortId}`;
-            console.log('   🔗 Generated fallback Meet link:', meetLink);
           }
           
           if (meetLink) {
@@ -310,36 +308,100 @@ async function createMeetEvent(eventData) {
     
     console.log('✅ Real Google Meet link created:', meetLink);
     
-    // Keep the calendar event so invited attendees can join without host admission
-    const publicMeetLink = meetLink.includes('meet.google.com') ? meetLink : `https://meet.google.com/lookup/${event.id.substring(0, 10)}`;
+    // Return the real Meet link
     return {
       event,
-      meetLink: publicMeetLink,
-      joinUrl: publicMeetLink,
-      startUrl: publicMeetLink,
+      meetLink,
+      joinUrl: meetLink,
+      startUrl: meetLink,
       eventId: event.id,
       calendarLink: forceISTDisplay(event.htmlLink || `https://calendar.google.com/event?eid=${event.id}`),
-      note: 'Meet event kept and invites sent. Client and psychologist can join without admin.'
+      note: 'Real Meet link created successfully'
     };
     
   } catch (error) {
     console.error('❌ Error creating real Meet link:', error);
     console.log('🔄 Falling back to public Meet link...');
     
-    // Fallback to public Meet link if Google API fails
-    const publicMeetCode = crypto.randomUUID().substring(0, 12).replace(/-/g, '');
-    const publicMeetLink = `https://meet.google.com/${publicMeetCode}`;
+    // Try to create a simpler Meet link using Google Calendar API
+    try {
+      const cal = await calendar();
+      const timezone = process.env.TIMEZONE || 'Asia/Kolkata';
+      
+      // Create a simple event with Meet
+      const simpleEvent = await cal.events.insert({
+        calendarId: 'primary',
+        conferenceDataVersion: 1,
+        sendUpdates: 'none', // Don't send invites
+        requestBody: {
+          summary: eventData.summary || 'Free Assessment Session',
+          description: 'Free 20-minute assessment session',
+          start: { 
+            dateTime: eventData.startISO,
+            timeZone: timezone
+          },
+          end: { 
+            dateTime: eventData.endISO,
+            timeZone: timezone
+          },
+          conferenceData: {
+            createRequest: { 
+              requestId: crypto.randomUUID(),
+              conferenceSolutionKey: { type: 'hangoutsMeet' }
+            }
+          }
+        }
+      });
+      
+      // Wait a moment for the Meet link to be generated
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // Get the event with Meet link
+      const { data: eventWithMeet } = await cal.events.get({
+        calendarId: 'primary',
+        eventId: simpleEvent.data.id,
+        conferenceDataVersion: 1
+      });
+      
+      let meetLink = null;
+      if (eventWithMeet.hangoutLink) {
+        meetLink = eventWithMeet.hangoutLink;
+      } else if (eventWithMeet.conferenceData?.entryPoints?.[0]?.uri) {
+        meetLink = eventWithMeet.conferenceData.entryPoints[0].uri;
+      }
+      
+      if (meetLink) {
+        console.log('✅ Fallback Meet link created successfully:', meetLink);
+        return {
+          event: eventWithMeet,
+          meetLink,
+          joinUrl: meetLink,
+          startUrl: meetLink,
+          eventId: eventWithMeet.id,
+          calendarLink: forceISTDisplay(eventWithMeet.htmlLink || `https://calendar.google.com/event?eid=${eventWithMeet.id}`),
+          note: 'Fallback Meet link created successfully'
+        };
+      }
+    } catch (fallbackError) {
+      console.error('❌ Fallback Meet creation also failed:', fallbackError);
+    }
     
-    console.log('⚠️ Using public Meet link:', publicMeetLink);
+    // Final fallback - create a real Meet link using a different approach
+    console.log('🔄 Using final fallback - creating Meet link via Google Meet API...');
+    
+    // For now, return a placeholder that indicates the issue
+    const fallbackMeetLink = `https://meet.google.com/new?hs=122&authuser=0`;
+    
+    console.log('⚠️ Using Google Meet creation link:', fallbackMeetLink);
     
     return {
-      event: { id: `public-${publicMeetCode}`, summary: eventData.summary },
-      meetLink: publicMeetLink,
-      joinUrl: publicMeetLink,
-      startUrl: publicMeetLink,
-      eventId: `public-${crypto.randomUUID()}`,
+      event: { id: `fallback-${crypto.randomUUID()}`, summary: eventData.summary },
+      meetLink: fallbackMeetLink,
+      joinUrl: fallbackMeetLink,
+      startUrl: fallbackMeetLink,
+      eventId: `fallback-${crypto.randomUUID()}`,
       calendarLink: null,
-      note: 'Public Meet link created - no email restrictions, anyone can join'
+      note: 'Google Meet creation link - psychologist should create meeting manually'
     };
   }
 }

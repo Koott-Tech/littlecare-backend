@@ -1564,6 +1564,168 @@ const reserveTimeSlot = async (req, res) => {
   }
 };
 
+// Get free assessment availability for rescheduling
+const getFreeAssessmentAvailabilityForReschedule = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.user.id;
+
+    console.log('📅 Fetching free assessment availability for reschedule');
+    console.log('   - Session ID:', sessionId);
+    console.log('   - User ID:', userId);
+
+    // Get client ID
+    const { data: client } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (!client) {
+      return res.status(404).json(
+        errorResponse('Client profile not found')
+      );
+    }
+
+    // Get existing session and verify ownership
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .eq('client_id', client.id)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json(
+        errorResponse('Session not found or access denied')
+      );
+    }
+
+    // Check if this is a free assessment session
+    if (session.session_type !== 'free_assessment') {
+      return res.status(400).json(
+        errorResponse('This endpoint is only for free assessment sessions')
+      );
+    }
+
+    // Get current date and next 30 days
+    const currentDate = new Date();
+    const endDate = new Date();
+    endDate.setDate(currentDate.getDate() + 30);
+
+    // Fetch free assessment availability for the next 30 days
+    const { data: dateConfigs, error: configError } = await supabase
+      .from('free_assessment_date_configs')
+      .select('date, time_slots')
+      .gte('date', currentDate.toISOString().split('T')[0])
+      .lte('date', endDate.toISOString().split('T')[0])
+      .order('date', { ascending: true });
+
+    if (configError) {
+      console.error('Error fetching free assessment configs:', configError);
+      return res.status(500).json(
+        errorResponse('Failed to fetch free assessment availability')
+      );
+    }
+
+    console.log('📅 Fetched date configs:', dateConfigs);
+    console.log('📅 Sample time_slots structure:', dateConfigs?.[0]?.time_slots);
+
+    // Process availability data
+    const availabilityData = {};
+    
+    for (const config of dateConfigs || []) {
+      const date = config.date;
+      const timeSlotsObj = config.time_slots || {};
+      
+      // Convert the object structure to a flat array of time slots
+      let allTimeSlots = [];
+      
+      // Extract time slots from all categories
+      Object.values(timeSlotsObj).forEach(categorySlots => {
+        if (Array.isArray(categorySlots)) {
+          allTimeSlots = allTimeSlots.concat(categorySlots);
+        }
+      });
+      
+      console.log(`📅 Date ${date} - All time slots:`, allTimeSlots);
+      
+      // Skip if no time slots available
+      if (allTimeSlots.length === 0) {
+        continue;
+      }
+      
+      // Get existing bookings for this date
+      const { data: bookedSessions } = await supabase
+        .from('sessions')
+        .select('scheduled_time')
+        .eq('scheduled_date', date)
+        .eq('session_type', 'free_assessment')
+        .in('status', ['booked', 'rescheduled', 'confirmed']);
+
+      const { data: bookedAssessments } = await supabase
+        .from('free_assessments')
+        .select('scheduled_time')
+        .eq('scheduled_date', date)
+        .eq('status', 'booked');
+
+      // Count bookings per time slot
+      const bookingCounts = {};
+      
+      // Count session bookings
+      bookedSessions?.forEach(booking => {
+        bookingCounts[booking.scheduled_time] = (bookingCounts[booking.scheduled_time] || 0) + 1;
+      });
+
+      // Count assessment bookings
+      bookedAssessments?.forEach(booking => {
+        bookingCounts[booking.scheduled_time] = (bookingCounts[booking.scheduled_time] || 0) + 1;
+      });
+
+      // Filter available slots
+      const availableSlots = allTimeSlots
+        .filter(timeSlot => {
+          const currentBookings = bookingCounts[timeSlot] || 0;
+          return currentBookings < 20; // Max 20 bookings per slot
+        })
+        .map(timeSlot => ({
+          time: timeSlot,
+          displayTime: timeSlot,
+          availableBookings: 20 - (bookingCounts[timeSlot] || 0),
+          maxBookings: 20,
+          currentBookings: bookingCounts[timeSlot] || 0
+        }));
+
+      if (availableSlots.length > 0) {
+        availabilityData[date] = {
+          availableSlots: availableSlots.length,
+          totalSlots: allTimeSlots.length,
+          slots: availableSlots
+        };
+      }
+    }
+
+    console.log('✅ Free assessment availability fetched successfully');
+    
+    res.json(
+      successResponse({
+        session: session,
+        availability: availabilityData,
+        dateRange: {
+          start: currentDate.toISOString().split('T')[0],
+          end: endDate.toISOString().split('T')[0]
+        }
+      })
+    );
+
+  } catch (error) {
+    console.error('Get free assessment availability error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while fetching availability')
+    );
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -1578,5 +1740,6 @@ module.exports = {
   submitSessionFeedback,
   getClientPackages,
   bookRemainingSession,
-  reserveTimeSlot
+  reserveTimeSlot,
+  getFreeAssessmentAvailabilityForReschedule
 };

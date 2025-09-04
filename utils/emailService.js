@@ -552,6 +552,261 @@ class EmailService {
 
     return this.transporter.sendMail(mailOptions);
   }
+
+  async sendFreeAssessmentConfirmation(assessmentData) {
+    try {
+      const {
+        clientName,
+        psychologistName,
+        assessmentDate,
+        assessmentTime,
+        assessmentNumber,
+        clientEmail,
+        psychologistEmail,
+        googleMeetLink
+      } = assessmentData;
+
+      // Parse date and time in IST (UTC+5:30)
+      const assessmentDateTime = new Date(`${assessmentDate}T${assessmentTime}+05:30`);
+      const formattedDate = assessmentDateTime.toLocaleDateString('en-IN', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        timeZone: 'Asia/Kolkata'
+      });
+      const formattedTime = assessmentDateTime.toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Kolkata',
+        timeZoneName: 'short'
+      });
+
+      // Send email to client
+      if (clientEmail && !clientEmail.includes('placeholder')) {
+        console.log('📧 Sending free assessment confirmation to client:', clientEmail);
+        await this.sendClientFreeAssessmentConfirmation({
+          to: clientEmail,
+          clientName,
+          psychologistName,
+          assessmentDate: formattedDate,
+          assessmentTime: formattedTime,
+          assessmentNumber,
+          googleMeetLink
+        });
+      }
+
+      // Send email to psychologist
+      if (psychologistEmail && !psychologistEmail.includes('placeholder')) {
+        console.log('📧 Sending free assessment notification to psychologist:', psychologistEmail);
+        await this.sendPsychologistFreeAssessmentNotification({
+          to: psychologistEmail,
+          clientName,
+          psychologistName,
+          assessmentDate: formattedDate,
+          assessmentTime: formattedTime,
+          assessmentNumber,
+          googleMeetLink
+        });
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error sending free assessment confirmation:', error);
+      return false;
+    }
+  }
+
+  async sendClientFreeAssessmentConfirmation(emailData) {
+    const { to, clientName, psychologistName, assessmentDate, assessmentTime, assessmentNumber, googleMeetLink } = emailData;
+
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || 'noreply@kuttikal.com',
+      to: to,
+      subject: `Free Assessment Confirmed - ${assessmentDate} at ${assessmentTime}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Free Assessment Confirmed</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: white;">
+            <div style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); padding: 20px; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 24px;">Free Assessment Confirmed!</h1>
+            </div>
+            
+            <div style="padding: 20px;">
+              <h2 style="color: #333; margin-top: 0;">Hello ${clientName},</h2>
+              
+              <p>Your free assessment session has been successfully booked! Here are the details:</p>
+              
+              <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
+                <h3 style="color: #155724; margin-top: 0;">Assessment Details</h3>
+                <p><strong>Assessment Number:</strong> ${assessmentNumber} of 20</p>
+                <p><strong>Date:</strong> ${assessmentDate}</p>
+                <p><strong>Time:</strong> ${assessmentTime}</p>
+                <p><strong>Duration:</strong> 20 minutes</p>
+                <p><strong>Therapist:</strong> ${psychologistName}</p>
+                <p><strong>Type:</strong> Free Assessment Session</p>
+              </div>
+              
+              <div style="background: #d1ecf1; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+                <h3 style="color: #0c5460; margin-top: 0;">Join Your Session</h3>
+                <p>Your session will be conducted online via Google Meet.</p>
+                ${googleMeetLink ? `
+                  <p><strong>Meeting Link:</strong></p>
+                  <p style="word-break: break-all; margin: 10px 0;">
+                    <a href="${googleMeetLink}" style="color: #007bff; text-decoration: underline; font-size: 16px;">${googleMeetLink}</a>
+                  </p>
+                  <div style="text-align: center; margin: 20px 0;">
+                    <a href="${googleMeetLink}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold; font-size: 16px;">
+                      🎥 Join Meeting Now
+                    </a>
+                  </div>
+                  <p style="font-size: 14px; color: #666; margin-top: 15px;">
+                    <strong>Note:</strong> If the button doesn't work, copy and paste this link into your browser:<br>
+                    <span style="background: #f8f9fa; padding: 5px; border-radius: 3px; font-family: monospace; font-size: 12px;">${googleMeetLink}</span>
+                  </p>
+                ` : '<p>Meeting link will be provided closer to the session time.</p>'}
+              </div>
+              
+              <div style="background: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
+                <h3 style="color: #856404; margin-top: 0;">Important Notes</h3>
+                <ul style="margin: 0; padding-left: 20px;">
+                  <li>Please join the meeting 5 minutes before your scheduled time</li>
+                  <li>Ensure you have a stable internet connection</li>
+                  <li>Find a quiet, private space for your session</li>
+                  <li>This is a free assessment session - no payment required</li>
+                  <li>You have ${20 - assessmentNumber} free assessments remaining</li>
+                </ul>
+              </div>
+              
+              <p>If you need to cancel or reschedule, please contact us at least 24 hours in advance.</p>
+              
+              <p>We look forward to meeting you!</p>
+              
+              <p>Best regards,<br>The Kuttikal Team</p>
+            </div>
+            
+            <div style="background: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #dee2e6;">
+              <p style="color: #6c757d; font-size: 14px; margin: 0;">
+                This is your free assessment session. No payment is required.
+              </p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+Free Assessment Confirmed!
+
+Hello ${clientName},
+
+Your free assessment session has been successfully booked!
+
+Assessment Details:
+- Assessment Number: ${assessmentNumber} of 20
+- Date: ${assessmentDate}
+- Time: ${assessmentTime}
+- Duration: 20 minutes
+- Therapist: ${psychologistName}
+- Type: Free Assessment Session
+
+Join Your Session:
+Your session will be conducted online via Google Meet.
+
+Meeting Link: ${googleMeetLink || 'Will be provided closer to session time'}
+
+Important Notes:
+- Please join the meeting 5 minutes before your scheduled time
+- Ensure you have a stable internet connection
+- Find a quiet, private space for your session
+- This is a free assessment session - no payment required
+- You have ${20 - assessmentNumber} free assessments remaining
+
+If you need to cancel or reschedule, please contact us at least 24 hours in advance.
+
+We look forward to meeting you!
+
+Best regards,
+The Kuttikal Team
+      `
+    };
+
+    return this.transporter.sendMail(mailOptions);
+  }
+
+  async sendPsychologistFreeAssessmentNotification(emailData) {
+    const { to, clientName, psychologistName, assessmentDate, assessmentTime, assessmentNumber, googleMeetLink } = emailData;
+
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || 'noreply@kuttikal.com',
+      to: to,
+      subject: `Free Assessment Scheduled - ${assessmentDate} at ${assessmentTime}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%); padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0;">Free Assessment Scheduled</h1>
+          </div>
+          
+          <div style="padding: 20px; background: #f8f9fa;">
+            <h2 style="color: #333;">Hello ${psychologistName},</h2>
+            
+            <p>A free assessment session has been scheduled with you. Here are the details:</p>
+            
+            <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
+              <h3 style="color: #155724; margin-top: 0;">Session Details</h3>
+              <p><strong>Client Name:</strong> ${clientName}</p>
+              <p><strong>Assessment Number:</strong> ${assessmentNumber} of 3</p>
+              <p><strong>Date:</strong> ${assessmentDate}</p>
+              <p><strong>Time:</strong> ${assessmentTime}</p>
+              <p><strong>Duration:</strong> 20 minutes</p>
+              <p><strong>Type:</strong> Free Assessment Session</p>
+            </div>
+            
+            <div style="background: #d1ecf1; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+              <h3 style="color: #0c5460; margin-top: 0;">Join Session</h3>
+              <p>This session will be conducted online via Google Meet.</p>
+              ${googleMeetLink ? `
+                <p><strong>Meeting Link:</strong> <a href="${googleMeetLink}" style="color: #007bff; text-decoration: none;">${googleMeetLink}</a></p>
+                <p style="margin-top: 15px;">
+                  <a href="${googleMeetLink}" style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                    Join Meeting
+                  </a>
+                </p>
+              ` : '<p>Meeting link will be provided closer to the session time.</p>'}
+            </div>
+            
+            <div style="background: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
+              <h3 style="color: #856404; margin-top: 0;">Important Notes</h3>
+              <ul style="margin: 0; padding-left: 20px;">
+                <li>This is a free assessment session - no payment involved</li>
+                <li>Please join the meeting 5 minutes before the scheduled time</li>
+                <li>Focus on understanding the client's needs and concerns</li>
+                <li>Provide recommendations for future therapy sessions if appropriate</li>
+                <li>Session duration is 20 minutes</li>
+              </ul>
+            </div>
+            
+            <p>Please ensure you're available at the scheduled time.</p>
+            
+            <p>Best regards,<br>The Kuttikal Team</p>
+          </div>
+          
+          <div style="background: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #dee2e6;">
+            <p style="color: #6c757d; font-size: 14px;">
+              This is a free assessment session. Please provide quality care.
+            </p>
+          </div>
+        </div>
+      `
+    };
+
+    return this.transporter.sendMail(mailOptions);
+  }
 }
 
 module.exports = new EmailService();
