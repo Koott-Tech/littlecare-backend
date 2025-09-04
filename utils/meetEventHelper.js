@@ -266,12 +266,25 @@ async function createMeetEvent(eventData) {
     console.log('🔄 Creating REAL Google Meet link (without calendar sync)...');
     console.log('   📅 Event Data:', eventData);
     
-    // Combine date and time into ISO format
-    const startISO = `${eventData.startDate}T${eventData.startTime}`;
-    const endISO = `${eventData.startDate}T${eventData.endTime}`;
+    // Use startISO and endISO if provided, otherwise combine date and time
+    let startISO, endISO;
     
-    console.log('   📅 Combined Start ISO:', startISO);
-    console.log('   📅 Combined End ISO:', endISO);
+    if (eventData.startISO && eventData.endISO) {
+      // Direct ISO format provided
+      startISO = eventData.startISO;
+      endISO = eventData.endISO;
+      console.log('   📅 Using provided ISO format');
+    } else if (eventData.startDate && eventData.startTime) {
+      // Combine date and time into ISO format
+      startISO = `${eventData.startDate}T${eventData.startTime}`;
+      endISO = `${eventData.startDate}T${eventData.endTime}`;
+      console.log('   📅 Combined date and time into ISO format');
+    } else {
+      throw new Error('Missing required date/time information');
+    }
+    
+    console.log('   📅 Final Start ISO:', startISO);
+    console.log('   📅 Final End ISO:', endISO);
     
     // Create temporary calendar event to get real Meet link
     const event = await createEventWithMeet({

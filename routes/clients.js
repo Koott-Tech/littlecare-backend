@@ -30,6 +30,9 @@ router.get('/psychologists/:psychologistId/packages', clientController.getPsycho
 // Book remaining session from package
 router.post('/book-remaining-session', clientController.bookRemainingSession);
 
+// Reserve time slot for payment
+router.post('/reserve-slot', clientController.reserveTimeSlot);
+
 // Get client packages
 router.get('/packages', clientController.getClientPackages);
 

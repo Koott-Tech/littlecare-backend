@@ -1065,6 +1065,101 @@ const updatePsychologist = async (req, res) => {
       }
     }
 
+    // Handle availability updates
+    if (availability && Array.isArray(availability) && availability.length > 0) {
+      console.log('📅 Availability provided for update:', availability);
+      
+      try {
+        // Convert frontend format to backend format
+        const availabilityRecords = [];
+        
+        for (const avail of availability) {
+          if (avail.day && avail.slots && Array.isArray(avail.slots)) {
+            // Generate dates for the next 1 occurrence of this day
+            const dates = getAvailabilityDatesForDay(avail.day, 1);
+            
+            if (dates.length > 0) {
+              const dateStr = dates[0].toISOString().split('T')[0]; // YYYY-MM-DD format
+              
+              // Convert all time slots to strings to prevent object storage
+              const stringTimeSlots = avail.slots.map(slot => {
+                if (typeof slot === 'object' && slot !== null) {
+                  // Extract the display time from object
+                  if (slot.displayTime) {
+                    return slot.displayTime;
+                  } else if (slot.time) {
+                    return slot.time;
+                  } else {
+                    console.warn('Time slot object has no displayable time property:', slot);
+                    return String(slot);
+                  }
+                } else if (typeof slot === 'string') {
+                  return slot;
+                } else {
+                  return String(slot);
+                }
+              });
+              
+              availabilityRecords.push({
+                psychologist_id: psychologistId,
+                date: dateStr,
+                time_slots: stringTimeSlots,
+                is_available: true
+              });
+            }
+          }
+        }
+
+        if (availabilityRecords.length > 0) {
+          // Delete existing availability first
+          const { error: deleteError } = await supabase
+            .from('availability')
+            .delete()
+            .eq('psychologist_id', psychologistId);
+
+          if (deleteError) {
+            console.error('Error deleting existing availability:', deleteError);
+          } else {
+            console.log('✅ Existing availability deleted');
+          }
+
+          // Insert ONLY the new availability records (no preservation of old ones)
+          const { data: newAvailability, error: insertError } = await supabase
+            .from('availability')
+            .insert(availabilityRecords)
+            .select('*');
+
+          if (insertError) {
+            console.error('Error inserting new availability:', insertError);
+          } else {
+            console.log(`✅ ${newAvailability.length} availability records created successfully`);
+          }
+        } else {
+          console.log('⚠️ No valid availability records to insert');
+        }
+      } catch (error) {
+        console.error('Error handling availability updates:', error);
+      }
+    } else if (availability && Array.isArray(availability) && availability.length === 0) {
+      // If empty array is sent, delete all availability
+      console.log('📅 Empty availability array sent - deleting all availability');
+      
+      try {
+        const { error: deleteError } = await supabase
+          .from('availability')
+          .delete()
+          .eq('psychologist_id', psychologistId);
+
+        if (deleteError) {
+          console.error('Error deleting all availability:', deleteError);
+        } else {
+          console.log('✅ All availability deleted');
+        }
+      } catch (error) {
+        console.error('Error deleting all availability:', error);
+      }
+    }
+
     res.json(
       successResponse(updatedPsychologist, 'Psychologist updated successfully')
     );

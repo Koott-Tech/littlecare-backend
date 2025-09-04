@@ -1459,6 +1459,111 @@ const bookRemainingSession = async (req, res) => {
   }
 };
 
+// Reserve a time slot for payment (without creating session)
+const reserveTimeSlot = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { psychologist_id, scheduled_date, scheduled_time, package_id } = req.body;
+
+    console.log('🔍 Step 1: Client validation');
+    // Get client ID
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (clientError || !client) {
+      console.log('❌ Client not found');
+      return res.status(404).json(
+        errorResponse('Client profile not found')
+      );
+    }
+
+    const clientId = client.id;
+    console.log('   - Client ID:', clientId);
+    console.log('   - User ID:', userId);
+    console.log('   - User Role:', req.user.role);
+
+    // Check if time slot is available
+    console.log('🔍 Step 2: Checking time slot availability...');
+    const { data: existingSessions } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('psychologist_id', psychologist_id)
+      .eq('scheduled_date', scheduled_date)
+      .eq('scheduled_time', scheduled_time)
+      .eq('status', 'booked');
+
+    if (existingSessions && existingSessions.length > 0) {
+      console.log('❌ Time slot already booked');
+      return res.status(400).json(
+        errorResponse('This time slot is already booked')
+      );
+    }
+
+    console.log('✅ Time slot is available');
+
+    // Get package details for pricing
+    let package = null;
+    if (package_id && package_id !== 'individual') {
+      const { data: packageData } = await supabase
+        .from('packages')
+        .select('*')
+        .eq('id', package_id)
+        .single();
+      
+      if (packageData) {
+        package = packageData;
+      }
+    }
+
+    // Get psychologist details
+    const { data: psychologistDetails } = await supabase
+      .from('psychologists')
+      .select('*')
+      .eq('id', psychologist_id)
+      .single();
+
+    if (!psychologistDetails) {
+      return res.status(404).json(
+        errorResponse('Psychologist not found')
+      );
+    }
+
+    // Extract individual session price from psychologist description
+    let individualPrice = 100; // Default fallback
+    if (psychologistDetails.description) {
+      const priceMatch = psychologistDetails.description.match(/Individual Session Price: ₹(\d+(?:\.\d+)?)/);
+      if (priceMatch) {
+        individualPrice = parseFloat(priceMatch[1]);
+      }
+    }
+
+    const price = package ? package.price : individualPrice;
+
+    res.json({
+      success: true,
+      data: {
+        clientId: clientId,
+        psychologistId: psychologist_id,
+        scheduledDate: scheduled_date,
+        scheduledTime: scheduled_time,
+        packageId: package_id,
+        price: price,
+        package: package,
+        psychologist: psychologistDetails
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Reserve time slot error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while reserving time slot')
+    );
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -1472,5 +1577,6 @@ module.exports = {
   rescheduleSession,
   submitSessionFeedback,
   getClientPackages,
-  bookRemainingSession
+  bookRemainingSession,
+  reserveTimeSlot
 };
