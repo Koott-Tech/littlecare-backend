@@ -169,6 +169,7 @@ app.get('/api/public/psychologists', async (req, res) => {
         phd_college,
         phone,
         cover_image_url,
+        individual_session_price,
         created_at
       `)
       .order('created_at', { ascending: false });
@@ -185,9 +186,20 @@ app.get('/api/public/psychologists', async (req, res) => {
 
     // Format the response
     const formattedPsychologists = psychologists.map(psych => {
-      // Try to extract price from description (support ₹ and $)
-      const priceMatch = psych.description?.match(/Individual Session Price: ([₹\$])(\d+(?:\.\d+)?)/);
-      const extractedPrice = priceMatch ? parseFloat(priceMatch[2]) : null;
+      // Use dedicated individual_session_price field, fallback to description extraction
+      let extractedPrice = psych.individual_session_price;
+      
+      // Fallback: Try to extract price from description if individual_session_price is null
+      if (!extractedPrice) {
+        const priceMatch = psych.description?.match(/Individual Session Price: [₹\$](\d+(?:\.\d+)?)/);
+        extractedPrice = priceMatch ? parseInt(priceMatch[1]) : null;
+      }
+      
+      console.log(`🔍 Price extraction for ${psych.first_name}:`, {
+        individual_session_price: psych.individual_session_price,
+        description: psych.description,
+        extractedPrice: extractedPrice
+      });
       
       return {
         id: psych.id,

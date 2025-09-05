@@ -250,7 +250,7 @@ const getAllPsychologists = async (req, res) => {
     const offset = (page - 1) * limit;
     const { data: psychologists, error: psychError } = await supabase
       .from('psychologists')
-      .select('*')
+      .select('*, individual_session_price')
       .range(offset, offset + limit - 1)
       .order('created_at', { ascending: order === 'asc' });
 
@@ -287,11 +287,27 @@ const getAllPsychologists = async (req, res) => {
       cover_image_url: psych.cover_image_url || null
     }));
 
-    // Extract individual price from description field
-    enrichedPsychologists.forEach(user => {
-      // Try to extract price from description (handle both integer and decimal prices)
-      const priceMatch = user.description?.match(/Individual Session Price: \$(\d+(?:\.\d+)?)/);
-      user.price = priceMatch ? parseFloat(priceMatch[1]) : null;
+    // Extract individual price from dedicated field or description field
+    enrichedPsychologists.forEach((user, index) => {
+      // Get the original psychologist data to access individual_session_price
+      const originalPsych = psychologists[index];
+      
+      // Use dedicated individual_session_price field, fallback to description extraction
+      let extractedPrice = originalPsych?.individual_session_price;
+      
+      // Fallback: Try to extract price from description if individual_session_price is null
+      if (!extractedPrice) {
+        const priceMatch = user.description?.match(/Individual Session Price: [₹\$](\d+(?:\.\d+)?)/);
+        extractedPrice = priceMatch ? parseInt(priceMatch[1]) : null;
+      }
+      
+      user.price = extractedPrice;
+      
+      console.log(`🔍 Admin price extraction for ${user.first_name}:`, {
+        originalIndividualSessionPrice: originalPsych?.individual_session_price,
+        userDescription: user.description,
+        extractedPrice: user.price
+      });
     });
 
     // Fetch availability data for all psychologists
@@ -784,7 +800,8 @@ const createPsychologist = async (req, res) => {
       description, 
       experience_years, 
       availability,
-      packages // New field for dynamic packages
+      packages, // New field for dynamic packages
+      price // Individual session price
     } = req.body;
 
     // Check if psychologist already exists with this email
@@ -817,7 +834,8 @@ const createPsychologist = async (req, res) => {
         phd_college,
         area_of_expertise,
         description,
-        experience_years: experience_years || 0
+        experience_years: experience_years || 0,
+        individual_session_price: price ? parseInt(price) : null
       }])
       .select('*')
       .single();
@@ -981,38 +999,28 @@ const updatePsychologist = async (req, res) => {
       );
     }
 
-    // Handle individual price by storing it in a custom field
+    // Handle individual price by storing it in the dedicated field
     if (price !== undefined) {
       console.log('💰 Individual price provided:', price);
+      console.log('💰 Psychologist ID:', psychologistId);
+      console.log('💰 Price type:', typeof price);
+      console.log('💰 Parsed price:', parseInt(price));
       
       try {
-        // Store price in a custom field or handle it differently
-        // For now, we'll store it in the description field as a temporary solution
-        const priceInfo = `Individual Session Price: ₹${price}`;
-        
-        // Remove any existing price info from description
-        let cleanDescription = psychologist.description || '';
-        // Remove both $ and ₹ variants
-        cleanDescription = cleanDescription.replace(/\n\nIndividual Session Price: [₹\$]\d+(?:\.\d+)?(\n\nIndividual Session Price: [₹\$]\d+(?:\.\d+)?)*/g, '');
-        cleanDescription = cleanDescription.replace(/Individual Session Price: [₹\$]\d+(?:\.\d+)?/g, '');
-        cleanDescription = cleanDescription.replace(/\n\n+/g, '\n\n'); // Clean up multiple newlines
-        
-        const updatedDescription = cleanDescription.trim() 
-          ? `${cleanDescription.trim()}\n\n${priceInfo}`
-          : priceInfo;
-        
+        // Store price in the dedicated individual_session_price field (as integer)
         const { error: priceUpdateError } = await supabase
           .from('psychologists')
-          .update({ description: updatedDescription })
+          .update({ individual_session_price: parseInt(price) })
           .eq('id', psychologistId);
 
         if (priceUpdateError) {
-          console.error('Error updating price in description:', priceUpdateError);
+          console.error('❌ Error updating individual_session_price:', priceUpdateError);
+          console.error('❌ Error details:', JSON.stringify(priceUpdateError, null, 2));
         } else {
-          console.log('✅ Price stored in description field');
+          console.log('✅ Price stored in individual_session_price field successfully');
         }
       } catch (error) {
-        console.error('Error handling individual price:', error);
+        console.error('❌ Error handling individual price:', error);
       }
     }
 
@@ -1032,36 +1040,92 @@ const updatePsychologist = async (req, res) => {
         } else {
           console.log('📦 Existing packages:', existingPackages);
           
-          // Update each package
+          // Process each package
           for (const pkg of packages) {
-            if (pkg.id && pkg.price !== undefined) {
-              // Find existing package by ID
-              const existingPackage = existingPackages.find(ep => ep.id === pkg.id);
+            // Skip individual session packages (sessions = 1) as they're handled by individual_session_price
+            if (pkg.sessions === 1) {
+              console.log(`📦 Skipping individual session package: ${pkg.name}`);
+              continue;
+            }
+
+            // Check if this is an existing package (has numeric ID) or new package (has temp ID)
+            const isExistingPackage = pkg.id && !isNaN(parseInt(pkg.id)) && parseInt(pkg.id) > 0;
+            
+            if (isExistingPackage) {
+              // Update existing package
+              const existingPackage = existingPackages.find(ep => ep.id === parseInt(pkg.id));
               if (existingPackage) {
-                console.log(`📦 Updating package ${pkg.id} (${pkg.name}) with price $${pkg.price}`);
+                console.log(`📦 Updating existing package ${pkg.id} (${pkg.name}) with price $${pkg.price}`);
                 
                 const { error: updateError } = await supabase
                   .from('packages')
                   .update({ 
-                    price: pkg.price,
+                    price: parseInt(pkg.price),
                     name: pkg.name || existingPackage.name,
-                    description: pkg.description || `${pkg.sessions} therapy sessions`
+                    description: pkg.description || `${pkg.sessions} therapy sessions`,
+                    session_count: pkg.sessions
                   })
                   .eq('id', pkg.id);
 
                 if (updateError) {
-                  console.error(`Error updating package ${pkg.id}:`, updateError);
+                  console.error(`❌ Error updating package ${pkg.id}:`, updateError);
                 } else {
                   console.log(`✅ Package ${pkg.id} updated successfully`);
                 }
               } else {
-                console.log(`📦 Package ${pkg.id} not found, skipping update`);
+                console.log(`📦 Package ${pkg.id} not found in database, skipping update`);
+              }
+            } else {
+              // Create new package
+              console.log(`📦 Creating new package: ${pkg.name} (${pkg.sessions} sessions, $${pkg.price})`);
+              console.log(`📦 Package data:`, pkg);
+              
+              // Ensure we have valid data
+              const sessionCount = parseInt(pkg.sessions) || pkg.sessions;
+              const packagePrice = parseInt(pkg.price);
+              const packageName = pkg.name || `Package of ${sessionCount} Sessions`;
+              const packageDescription = pkg.description || `${sessionCount} therapy sessions`;
+              const packageType = `package_${sessionCount}`;
+              
+              if (!sessionCount || sessionCount < 1) {
+                console.error(`❌ Invalid session count for package: ${pkg.sessions}`);
+                continue;
+              }
+              
+              if (!packagePrice || packagePrice <= 0) {
+                console.error(`❌ Invalid price for package: ${pkg.price}`);
+                continue;
+              }
+              
+              const packageData = {
+                psychologist_id: psychologistId,
+                name: packageName,
+                session_count: sessionCount,
+                price: packagePrice,
+                description: packageDescription,
+                package_type: packageType,
+                discount_percentage: pkg.discount_percentage || 0
+              };
+              
+              console.log(`📦 Inserting package data:`, packageData);
+              
+              const { data: insertedPackage, error: createError } = await supabase
+                .from('packages')
+                .insert(packageData)
+                .select('*');
+
+              if (createError) {
+                console.error(`❌ Error creating package ${pkg.name}:`, createError);
+                console.error(`❌ Error details:`, JSON.stringify(createError, null, 2));
+              } else {
+                console.log(`✅ Package ${pkg.name} created successfully`);
+                console.log(`✅ Inserted package:`, insertedPackage);
               }
             }
           }
         }
       } catch (error) {
-        console.error('Error handling package updates:', error);
+        console.error('❌ Error handling package updates:', error);
       }
     }
 
