@@ -11,22 +11,7 @@ const emailVerificationService = require('../utils/emailVerificationService');
 // User registration
 const register = async (req, res) => {
   try {
-    const { email, password, role, otp } = req.body;
-
-    // Check if email is verified
-    if (!otp) {
-      return res.status(400).json(
-        errorResponse('Email verification required. Please verify your email first.')
-      );
-    }
-
-    // Verify OTP
-    const verificationResult = await emailVerificationService.verifyOTP(email, otp, 'registration');
-    if (!verificationResult.success) {
-      return res.status(400).json(
-        errorResponse(verificationResult.message, verificationResult.error)
-      );
-    }
+    const { email, password, role } = req.body;
 
     // Check if user already exists
     const { data: existingUser } = await supabase
@@ -561,65 +546,6 @@ const logout = async (req, res) => {
 };
 
 // Send OTP for email verification during registration
-const sendRegistrationOTP = async (req, res) => {
-  try {
-    const { email, role = 'client' } = req.body;
-
-    if (!email) {
-      return res.status(400).json(
-        errorResponse('Email is required')
-      );
-    }
-
-    // Check if user already exists
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .single();
-
-    if (existingUser) {
-      return res.status(400).json(
-        errorResponse('User with this email already exists')
-      );
-    }
-
-    // Check if psychologist already exists with this email
-    if (role === 'psychologist') {
-      const { data: existingPsychologist } = await supabase
-        .from('psychologists')
-        .select('id')
-        .eq('email', email)
-        .single();
-
-      if (existingPsychologist) {
-        return res.status(400).json(
-          errorResponse('Psychologist with this email already exists')
-        );
-      }
-    }
-
-    // Send OTP
-    const result = await emailVerificationService.sendOTP(email, 'registration', role);
-
-    if (!result.success) {
-      return res.status(400).json(
-        errorResponse(result.message, result.error)
-      );
-    }
-
-    res.json(
-      successResponse(result.data, result.message)
-    );
-
-  } catch (error) {
-    console.error('Error sending registration OTP:', error);
-    res.status(500).json(
-      errorResponse('Internal server error while sending OTP')
-    );
-  }
-};
-
 module.exports = {
   register,
   login,
@@ -627,7 +553,6 @@ module.exports = {
   updateProfilePicture,
   changePassword,
   logout,
-  sendRegistrationOTP,
   sendPasswordResetOTP,
   resetPassword
 };

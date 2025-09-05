@@ -809,6 +809,28 @@ The Kuttikal Team
   }
 
   // Send session completion notification to client
+  // Generic email sending function
+  async sendEmail({ to, subject, html, text }) {
+    try {
+      if (!this.transporter) {
+        throw new Error('Email service not initialized');
+      }
+
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: to,
+        subject: subject,
+        html: html,
+        text: text
+      };
+
+      return await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending email:', error);
+      throw error;
+    }
+  }
+
   async sendSessionCompletionNotification({
     clientName,
     childName,
