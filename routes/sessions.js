@@ -11,6 +11,7 @@ router.get('/client/:clientId', authenticateToken, sessionController.getClientSe
 router.get('/psychologist/:psychologistId', authenticateToken, sessionController.getPsychologistSessions);
 router.get('/admin/all', authenticateToken, sessionController.getAllSessions);
 router.put('/:sessionId/status', authenticateToken, sessionController.updateSessionStatus);
+router.put('/:sessionId/complete', authenticateToken, sessionController.completeSession); // Complete session with summary, report, and notes
 router.delete('/:sessionId', authenticateToken, sessionController.deleteSession);
 
 // Reschedule request handling (psychologist only)

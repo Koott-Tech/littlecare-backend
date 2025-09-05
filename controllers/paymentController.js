@@ -68,6 +68,8 @@ const generateAndStoreReceipt = async (sessionData, paymentData, clientData, psy
           console.log('✅ Receipt metadata stored successfully');
         }
 
+        // Note: pdfBuffer is automatically garbage collected - no local file cleanup needed
+
       } catch (error) {
         console.error('❌ Error in PDF upload process:', error);
       }

@@ -807,6 +807,87 @@ The Kuttikal Team
 
     return this.transporter.sendMail(mailOptions);
   }
+
+  // Send session completion notification to client
+  async sendSessionCompletionNotification({
+    clientName,
+    childName,
+    psychologistName,
+    sessionDate,
+    sessionTime,
+    clientEmail
+  }) {
+    try {
+      const mailOptions = {
+        from: process.env.EMAIL_FROM || 'noreply@kuttikal.com',
+        to: clientEmail,
+        subject: 'Session Completed - Summary & Report Available',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+              <h1 style="margin: 0; font-size: 28px;">Session Completed</h1>
+              <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Your therapy session summary and report are ready</p>
+            </div>
+            
+            <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
+              <h2 style="color: #2d3748; margin-top: 0;">Hello ${clientName},</h2>
+              
+              <p style="color: #4a5568; line-height: 1.6;">
+                Great news! Your therapy session with <strong>${psychologistName}</strong> has been completed.
+              </p>
+              
+              <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4F46E5;">
+                <h3 style="color: #2d3748; margin-top: 0;">Session Details</h3>
+                <p style="margin: 5px 0; color: #4a5568;"><strong>Child:</strong> ${childName}</p>
+                <p style="margin: 5px 0; color: #4a5568;"><strong>Date:</strong> ${sessionDate}</p>
+                <p style="margin: 5px 0; color: #4a5568;"><strong>Time:</strong> ${sessionTime}</p>
+                <p style="margin: 5px 0; color: #4a5568;"><strong>Psychologist:</strong> ${psychologistName}</p>
+              </div>
+              
+              <p style="color: #4a5568; line-height: 1.6;">
+                Your psychologist has provided a detailed summary and report of the session. You can now view these in your profile.
+              </p>
+              
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${process.env.FRONTEND_URL || 'https://kuttikal.vercel.app'}/profile" 
+                   style="background: #4F46E5; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
+                  View Session Summary & Report
+                </a>
+              </div>
+              
+              <div style="background: #e6fffa; border: 1px solid #81e6d9; padding: 15px; border-radius: 6px; margin: 20px 0;">
+                <p style="margin: 0; color: #234e52; font-size: 14px;">
+                  <strong>📋 What you'll find:</strong><br>
+                  • Session summary with key points<br>
+                  • Detailed report with findings and recommendations<br>
+                  • Next steps for continued care
+                </p>
+              </div>
+              
+              <p style="color: #4a5568; line-height: 1.6;">
+                If you have any questions about the session or need to schedule a follow-up, please don't hesitate to reach out.
+              </p>
+              
+              <p style="color: #4a5568; line-height: 1.6;">
+                Best regards,<br>
+                <strong>The Kuttikal Team</strong>
+              </p>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px; color: #6c757d; font-size: 12px;">
+              <p>This is an automated message. Please do not reply to this email.</p>
+              <p>&copy; 2024 Kuttikal. All rights reserved.</p>
+            </div>
+          </div>
+        `
+      };
+
+      return this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending session completion notification:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new EmailService();

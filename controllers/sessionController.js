@@ -1149,6 +1149,129 @@ const handleRescheduleRequest = async (req, res) => {
   }
 };
 
+// Complete session with summary, report, and notes (psychologist only)
+const completeSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { summary, report, summary_notes } = req.body;
+    const psychologistId = req.user.id;
+
+    // Validate required fields
+    if (!summary || !report || !summary_notes) {
+      return res.status(400).json(
+        errorResponse('Summary, report, and summary notes are required')
+      );
+    }
+
+    // Check if session exists and belongs to this psychologist
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select(`
+        *,
+        client:clients(
+          id,
+          first_name,
+          last_name,
+          child_name,
+          child_age,
+          user_id,
+          user:users(email)
+        )
+      `)
+      .eq('id', sessionId)
+      .eq('psychologist_id', psychologistId)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json(
+        errorResponse('Session not found or you do not have permission to complete this session')
+      );
+    }
+
+    // Check if session is already completed
+    if (session.status === 'completed') {
+      return res.status(400).json(
+        errorResponse('Session is already completed')
+      );
+    }
+
+    // Update session with completion data
+    const { data: updatedSession, error: updateError } = await supabase
+      .from('sessions')
+      .update({
+        status: 'completed',
+        summary: summary.trim(),
+        report: report.trim(),
+        summary_notes: summary_notes.trim(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sessionId)
+      .select(`
+        *,
+        client:clients(
+          id,
+          first_name,
+          last_name,
+          child_name,
+          child_age,
+          user_id,
+          user:users(email)
+        )
+      `)
+      .single();
+
+    if (updateError) {
+      console.error('Error updating session:', updateError);
+      return res.status(500).json(
+        errorResponse('Failed to complete session')
+      );
+    }
+
+    // Send completion notification to client
+    try {
+      const clientNotificationData = {
+        user_id: session.client.user_id,
+        title: 'Session Completed',
+        message: `Your session with ${req.user.first_name || 'your psychologist'} has been completed. You can now view the summary and report.`,
+        type: 'success',
+        related_id: sessionId,
+        related_type: 'session'
+      };
+
+      await supabase
+        .from('notifications')
+        .insert([clientNotificationData]);
+
+      // Send email notification to client
+      if (session.client.user?.email) {
+        await emailService.sendSessionCompletionNotification({
+          clientName: `${session.client.first_name} ${session.client.last_name}`,
+          childName: session.client.child_name,
+          psychologistName: req.user.first_name || 'Your Psychologist',
+          sessionDate: formatDate(session.scheduled_date),
+          sessionTime: formatTime(session.scheduled_time),
+          clientEmail: session.client.user.email
+        });
+      }
+    } catch (notificationError) {
+      console.error('Error sending completion notification:', notificationError);
+      // Don't fail the request if notification fails
+    }
+
+    console.log(`✅ Session ${sessionId} completed by psychologist ${psychologistId}`);
+    
+    res.json(
+      successResponse(updatedSession, 'Session completed successfully')
+    );
+
+  } catch (error) {
+    console.error('Error completing session:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while completing session')
+    );
+  }
+};
+
 module.exports = {
   bookSession,
   getClientSessions,
@@ -1156,5 +1279,6 @@ module.exports = {
   getAllSessions,
   updateSessionStatus,
   deleteSession,
-  handleRescheduleRequest
+  handleRescheduleRequest,
+  completeSession
 };

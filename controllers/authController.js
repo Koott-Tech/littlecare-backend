@@ -6,11 +6,27 @@ const {
   successResponse,
   errorResponse
 } = require('../utils/helpers');
+const emailVerificationService = require('../utils/emailVerificationService');
 
 // User registration
 const register = async (req, res) => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password, role, otp } = req.body;
+
+    // Check if email is verified
+    if (!otp) {
+      return res.status(400).json(
+        errorResponse('Email verification required. Please verify your email first.')
+      );
+    }
+
+    // Verify OTP
+    const verificationResult = await emailVerificationService.verifyOTP(email, otp, 'registration');
+    if (!verificationResult.success) {
+      return res.status(400).json(
+        errorResponse(verificationResult.message, verificationResult.error)
+      );
+    }
 
     // Check if user already exists
     const { data: existingUser } = await supabase
@@ -397,6 +413,137 @@ const changePassword = async (req, res) => {
   }
 };
 
+// Send password reset OTP
+const sendPasswordResetOTP = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json(
+        errorResponse('Email is required')
+      );
+    }
+
+    // Check if user exists (only for clients in users table)
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, email, role')
+      .eq('email', email)
+      .single();
+
+    if (!user) {
+      return res.status(404).json(
+        errorResponse('No account found with this email address')
+      );
+    }
+
+    // Only allow password reset for clients
+    if (user.role !== 'client') {
+      return res.status(403).json(
+        errorResponse('Password reset is only available for client accounts')
+      );
+    }
+
+    // Send OTP for password reset
+    const result = await emailVerificationService.sendOTP(email, 'password_reset', 'client');
+    
+    if (!result.success) {
+      return res.status(400).json(
+        errorResponse(result.message, result.error)
+      );
+    }
+
+    res.json(
+      successResponse(null, 'Password reset OTP sent to your email')
+    );
+
+  } catch (error) {
+    console.error('Send password reset OTP error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while sending password reset OTP')
+    );
+  }
+};
+
+// Reset password with OTP
+const resetPassword = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json(
+        errorResponse('Email, OTP, and new password are required')
+      );
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json(
+        errorResponse('New password must be at least 6 characters long')
+      );
+    }
+
+    // Verify OTP
+    const verificationResult = await emailVerificationService.verifyOTP(email, otp, 'password_reset');
+    if (!verificationResult.success) {
+      return res.status(400).json(
+        errorResponse(verificationResult.message, verificationResult.error)
+      );
+    }
+
+    // Check if user exists
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, email, role')
+      .eq('email', email)
+      .single();
+
+    if (!user) {
+      return res.status(404).json(
+        errorResponse('User not found')
+      );
+    }
+
+    // Only allow password reset for clients
+    if (user.role !== 'client') {
+      return res.status(403).json(
+        errorResponse('Password reset is only available for client accounts')
+      );
+    }
+
+    // Hash new password
+    const hashedPassword = await hashPassword(newPassword);
+
+    // Update password
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ 
+        password_hash: hashedPassword,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', user.id);
+
+    if (updateError) {
+      console.error('Password reset update error:', updateError);
+      return res.status(500).json(
+        errorResponse('Failed to reset password')
+      );
+    }
+
+    // Mark OTP as used
+    await emailVerificationService.markOTPAsUsed(email, otp, 'password_reset');
+
+    res.json(
+      successResponse(null, 'Password reset successfully')
+    );
+
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while resetting password')
+    );
+  }
+};
+
 // Logout (client-side token removal)
 const logout = async (req, res) => {
   try {
@@ -413,11 +560,74 @@ const logout = async (req, res) => {
   }
 };
 
+// Send OTP for email verification during registration
+const sendRegistrationOTP = async (req, res) => {
+  try {
+    const { email, role = 'client' } = req.body;
+
+    if (!email) {
+      return res.status(400).json(
+        errorResponse('Email is required')
+      );
+    }
+
+    // Check if user already exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (existingUser) {
+      return res.status(400).json(
+        errorResponse('User with this email already exists')
+      );
+    }
+
+    // Check if psychologist already exists with this email
+    if (role === 'psychologist') {
+      const { data: existingPsychologist } = await supabase
+        .from('psychologists')
+        .select('id')
+        .eq('email', email)
+        .single();
+
+      if (existingPsychologist) {
+        return res.status(400).json(
+          errorResponse('Psychologist with this email already exists')
+        );
+      }
+    }
+
+    // Send OTP
+    const result = await emailVerificationService.sendOTP(email, 'registration', role);
+
+    if (!result.success) {
+      return res.status(400).json(
+        errorResponse(result.message, result.error)
+      );
+    }
+
+    res.json(
+      successResponse(result.data, result.message)
+    );
+
+  } catch (error) {
+    console.error('Error sending registration OTP:', error);
+    res.status(500).json(
+      errorResponse('Internal server error while sending OTP')
+    );
+  }
+};
+
 module.exports = {
   register,
   login,
   getProfile,
   updateProfilePicture,
   changePassword,
-  logout
+  logout,
+  sendRegistrationOTP,
+  sendPasswordResetOTP,
+  resetPassword
 };

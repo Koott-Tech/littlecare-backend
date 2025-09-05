@@ -15,3 +15,4 @@ router.put('/mark-all-read', notificationController.markAllClientNotificationsAs
 router.delete('/:notificationId', notificationController.deleteClientNotification);
 
 module.exports = router;
+
